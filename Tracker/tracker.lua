@@ -3627,9 +3627,17 @@ function tracker:renderGUI()
       local cdata = data[dlink[relx]][rows*xlink[relx]+absy-1]
       if (dlink[relx] == 'text' and self.cfg.buzzNoteCols == 1) then
         if (cdata == -1) then
-          cdata = "."
+          cdata = 0
         else
           cdata = string.sub(cdata,1,1)
+        end
+      end
+      if (dlink[relx] == 'octave') then
+        local ctext = data.text[rows*xlink[relx]+absy-1]
+        if ( ctext == -1) then
+          cdata = 0
+        else
+          cdata = string.sub(ctext,3,3)
         end
       end
       writeField( cdata, ellipsis, xloc[relx], yloc[rely], customFont )
@@ -6155,7 +6163,6 @@ function tracker:assignFromMIDI(channel, idx)
   local data = self.data
   if ( self:isFree( channel, ystart, yend ) ) then
     data.text[rows*channel+ystart]      = pitchTable[pitch]
-    data.octave[rows*channel+ystart]    = string.sub(pitchTable[pitch],3,3)
     data.vel1[rows*channel+ystart]      = self:velToField(vel, 1)
     data.vel2[rows*channel+ystart]      = self:velToField(vel, 2)
 
@@ -6179,7 +6186,6 @@ function tracker:assignFromMIDI(channel, idx)
       if ( self:isFree( channel, yend+1, yend+1, 1 ) ) then
         data.text[rows*channel+yend+1] = 'OFF'
         data.note[rows*channel+yend+1] = -1
-        data.octave[rows*channel+yend+1] = 'F'
       end
     end
     return true
@@ -6324,7 +6330,7 @@ function tracker:initializeGrid()
     for y=0,rows-1 do
       data.note[rows*x+y]   = nil
       data.text[rows*x+y]   = -1
-      data.octave[rows*x+y]   = '.'
+      data.octave[rows*x+y]   = ''
       data.vel1[rows*x+y]   = '.'
       data.vel2[rows*x+y]   = '.'
       if ( self.showDelays[x] == 1 ) then
