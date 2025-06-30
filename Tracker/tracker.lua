@@ -794,14 +794,14 @@ function updateFontScale()
   tracker.grid.fontScaler = fontScaler
   tracker.grid.originx   = 22 + 18*fontScaler  -- 35
   tracker.grid.originy   = 35
-  tracker.grid.dx        = 8 * fontScaler
+  tracker.grid.dx        = (tracker.colors.customFontDisplace and tracker.colors.customFontDisplace[1]) or 8 * fontScaler
   tracker.grid.dy        = 20 * fontScaler
   tracker.grid.barpad    = 10 * fontScaler
   tracker.grid.itempadx  = 5
   tracker.grid.itempady  = 3
-  
-  tracker.harmonyWidth    = 520 * fontScaler
-  tracker.noteNamesWidth  = 250 * fontScaler
+  tracker.grid.extraFontShift   = (tracker.colors.customFontDisplace and tracker.colors.customFontDisplace[2]) or 0
+  tracker.harmonyWidth    = 65 * tracker.grid.dx
+  tracker.noteNamesWidth  = 32 * tracker.grid.dx
 
   local txt_w, txt_h = gfx.measurestr("CTRL + Shift + Click row indicator Change highlighting (RMB resets)")
   tracker.helpwidth       = txt_w -- 400 * fontScaler
@@ -2606,7 +2606,7 @@ function tracker:linkData()
     master[#master+1]       = 1
     datafield[#datafield+1] = 'text'
     idx[#idx+1]             = j
-    colsizes[#colsizes + 1] = 3 * tracker.grid.fontScaler
+    colsizes[#colsizes + 1] = 3
     padsizes[#padsizes + 1] = 1
     if ( self.selectionBehavior == 1 ) then
       grouplink[#grouplink+1] = {1, 2}
@@ -2622,7 +2622,7 @@ function tracker:linkData()
     hints[#hints+1]         = string.format('Note channel %2d', j + channelOffset)
 
     if (self.cfg.buzzNoteCols == 1) then
-      colsizes[#colsizes] = 1 * tracker.grid.fontScaler
+      colsizes[#colsizes] = 1
       if ( self.selectionBehavior == 1 ) then
         grouplink[#grouplink] = {1, 2, 3}
       else
@@ -2632,7 +2632,7 @@ function tracker:linkData()
       master[#master+1]       = 0
       datafield[#datafield+1] = 'octave'
       idx[#idx+1]             = j
-      colsizes[#colsizes + 1] = tracker.grid.fontScaler
+      colsizes[#colsizes + 1] = 1
       padsizes[#padsizes + 1] = 1
       if ( self.selectionBehavior == 1 ) then
         grouplink[#grouplink+1] = {-1, 1,2}
@@ -2826,7 +2826,7 @@ function tracker:updatePlotLink()
   local q = 0
   for j = fov.scrollx+1,#colsizes do
     xloc[#xloc + 1] = x
-    xwidth[#xwidth + 1] = colsizes[j] * dx + padsizes[j]
+    xwidth[#xwidth + 1] = colsizes[j] * dx
     xlink[#xlink + 1] = idxfields[j]
     dlink[#dlink + 1] = datafields[j]
     glink[#glink + 1] = grouplink[j]
@@ -3155,48 +3155,38 @@ function tracker:getSizeIndicatorLocation()
   return xl, yl, xm, ym
 end
 
-local function draw_ellipsis(x, py)
-  gfx.rect(x,  py, 1, 1)
-  gfx.rect(x+2, py, 1, 1)
-  gfx.rect(x+4, py, 1, 1)
+local function draw_ellipsis(x, y, dx)
+  gfx.rect(x + math.floor(dx/4),  y, 1, 1)
+  gfx.rect(x + math.floor(dx/2), y, 1, 1)
+  gfx.rect(x + math.floor(3*dx/4), y, 1, 1)
 end
 
-local function writeField(cdata, ellipsis, x, y, customFont)
+local function writeField(cdata, ellipsis, x, y, dx, dy, extraFontShift)
   if ( type(cdata) == "number" ) then
     if ( cdata == -1 ) then
       if ( ellipsis == 1 ) then
-        local py = y + 6
-        local delta = customFont and customFont[1] or 9
-        x = x + 2
-        draw_ellipsis(x, py)
-        draw_ellipsis(x + delta, py)
-        draw_ellipsis(x + delta*2, py)
+        local py = y + math.floor(dy / 4)
+        draw_ellipsis(x, py, dx)
+        draw_ellipsis(x + dx, py, dx)
+        draw_ellipsis(x + dx*2, py, dx)
       else
         gfx.printf("...")
       end
     else
       if ( ellipsis == 1 ) then
-        local py = y + 6
-        draw_ellipsis(x, py)
+        local py = y + math.floor(dy / 4)
+        draw_ellipsis(x, py, dx)
       else
         gfx.printf(".")
       end
     end
-  else
-    if ( customFont )  then
-      local cx = x
-      if ( not cdata ) then
-        return
-      end
-
-      for i=1,#cdata do
-        gfx.x = cx
-        gfx.y = y + customFont[2]
-        gfx.printf("%s", cdata:sub(i,i))
-        cx = cx + customFont[1]
-      end
-    else
-      gfx.printf("%s", cdata)
+  elseif ( cdata ) then
+    local cx = x
+    for i=1,#cdata do
+      gfx.x = cx
+      gfx.y = y + extraFontShift
+      gfx.printf("%s", cdata:sub(i,i))
+      cx = cx + dx
     end
   end
 end
@@ -3481,7 +3471,7 @@ function tracker:customFieldDescription()
   end
 end
 
-function drawPattern(colors, data, scrolly, rows, sig, zeroindexed, xloc, yloc, yheight, yshift, itempadx, itempady, tw, extraFontShift, indicatorShiftX, dlink, xlink)
+function drawPattern(colors, data, scrolly, rows, sig, zeroindexed, xloc, yloc, yheight, yshift, itempadx, itempady, tw, extraFontShift, indicatorShiftX, dlink, xlink, dx, dy, ellipsis)
   local gfx = gfx
   local c1, c2, tx, fc
   for y=1,#yloc do
@@ -3526,7 +3516,7 @@ function drawPattern(colors, data, scrolly, rows, sig, zeroindexed, xloc, yloc, 
         gfx.set(table.unpack(fc[thisfield] or tx))
 
         local cdata = data[thisfield][rows*xlink[x]+absy-1]
-        writeField( cdata, ellipsis, xloc[x], yloc[y], customFont )
+        writeField( cdata, ellipsis, xloc[x], yloc[y], dx, dy, extraFontShift )
       end
     end
   end
@@ -3568,13 +3558,12 @@ function tracker:renderGUI()
   local yshift        = plotData.yshift
   local headerShift   = 0
 
-  local customFont
-  local extraFontShift  = 0
+  local dx              = tracker.grid.dx
+  local dy              = tracker.grid.dy
+  local extraFontShift  = tracker.grid.extraFontShift
 
-  if ( colors.patternFont and colors.patternFontSize and colors.customFontDisplace ) then
+  if ( colors.patternFont and colors.patternFontSize ) then
     gfx.setfont(1, colors.patternFont, colors.patternFontSize)
-    customFont = colors.customFontDisplace
-    extraFontShift = customFont[2]
   else
     gfx.setfont(0)
     headerShift = 4
@@ -3604,14 +3593,14 @@ function tracker:renderGUI()
         gfx.setimgdim(2, gfx.w, gfx.h)
         gfx.set(table.unpack(colors. windowbackground))
         gfx.rect(0, 0, gfx.w, gfx.h)
-        drawPattern(colors, data, scrolly, rows, sig, self.zeroindexed, xloc, yloc, yheight, yshift, itempadx, itempady, tw, extraFontShift, plotData.indicatorShiftX, dlink, xlink)
+        drawPattern(colors, data, scrolly, rows, sig, self.zeroindexed, xloc, yloc, yheight, yshift, itempadx, itempady, tw, extraFontShift, plotData.indicatorShiftX, dlink, xlink, dx, dy, ellipsis)
       end
       gfx.dest = -1
       gfx.x = 0
       gfx.y = 0
       gfx.blit(2, 1, 0)
     else
-      drawPattern(colors, data, scrolly, rows, sig, self.zeroindexed, xloc, yloc, yheight, yshift, itempadx, itempady, tw, extraFontShift, plotData.indicatorShiftX, dlink, xlink)
+      drawPattern(colors, data, scrolly, rows, sig, self.zeroindexed, xloc, yloc, yheight, yshift, itempadx, itempady, tw, extraFontShift, plotData.indicatorShiftX, dlink, xlink, dx, dy, ellipsis)
     end
   
     -- Selector
@@ -3640,7 +3629,7 @@ function tracker:renderGUI()
           cdata = string.sub(ctext,3,3)
         end
       end
-      writeField( cdata, ellipsis, xloc[relx], yloc[rely], customFont )
+      writeField( cdata, ellipsis, xloc[relx], yloc[rely], dx, dy, extraFontShift )
     end
 
     -- Pattern Length Indicator
