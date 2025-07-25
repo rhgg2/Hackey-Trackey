@@ -7023,10 +7023,10 @@ function tracker:addCCPt(row, modtype, value)
   if ( modtype >= self.PCloc ) then
     modtype = modtype - self.PCloc
     ch = math.floor(modtype / self.CCjump)
-    reaper.MIDI_InsertCC(self.take, false, false, ppqStart, 192, ch, value, 0)
+    reaper.MIDI_InsertCC(self.take, false, false, ppqStart, 192, ch, math.min(value, 127), 0)
   else
     ch = math.floor(modtype / self.CCjump)
-    reaper.MIDI_InsertCC(self.take, false, false, ppqStart, 176, ch, modtype - ch*self.CCjump, value)
+    reaper.MIDI_InsertCC(self.take, false, false, ppqStart, 176, ch, modtype - ch*self.CCjump, math.min(value, 127))
   end
 end
 
@@ -7041,11 +7041,11 @@ function tracker:addCCPt_channel(row, modtype, value)
   if ( modtype >= self.PCloc ) then
     local modtype = modtype - self.PCloc
     local ch = math.floor(modtype / self.CCjump)
-    reaper.MIDI_InsertCC(self.take, false, false, ppqStart, 192, ch, value, 0)
+    reaper.MIDI_InsertCC(self.take, false, false, ppqStart, 192, ch, math.min(value, 127), 0)
   else
     local ch = math.floor(modtype / self.CCjump)
     local cc_type = modtype - ch*self.CCjump
-    reaper.MIDI_InsertCC(self.take, false, false, ppqStart, 176, ch, cc_type, value)
+    reaper.MIDI_InsertCC(self.take, false, false, ppqStart, 176, ch, cc_type, math.min(value, 127))
     if (self.tracker_samples == 1) and cc_type == self.sampler_effect_type then
       -- There's a CC value that is used to "terminate" effects in sampler mode. This is to prevent effects from
       -- previous patterns being replayed on top of this pattern when midi cc's are chased.
