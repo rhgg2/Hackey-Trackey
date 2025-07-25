@@ -7008,7 +7008,7 @@ function tracker:getCC( row, modtype )
     end
   end
 
-  return modtype or self.lastmodtype, self.lastmodval
+  return modtype or self.lastmodtype, 0
 end
 
 -------------------
