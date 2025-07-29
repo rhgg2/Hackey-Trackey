@@ -913,6 +913,7 @@ tracker.cfg.channelOffset = 1
 tracker.cfg.useCachedRendering = 1
 tracker.cfg.showAvgFrameTime = 0
 tracker.cfg.buzzNoteCols = 0
+tracker.cfg.wrapAtBottom = 0
 
 tracker.tracker_samples = 0
 tracker.cfg.fixedIndicator = 0
@@ -970,6 +971,7 @@ tracker.binaryOptions = {
     { 'noloopGlue', 'Force item to not loop when resizing' },
     { 'wrapAroundSeeking', 'Wrap around when seeking items' },
     { 'buzzNoteCols', 'Buzz-style note columns' },
+    { 'wrapAtBottom', 'Wrap cursor on advancing past pattern end' },
     }
 
 tracker.colorschemes = {"default", "buzz", "it", "hacker", "renoise", "renoiseB", "renoiseC", "buzz2", "sink", "TonE"}
@@ -4683,7 +4685,11 @@ function tracker:advanceCursor()
   else
     self.ypos = self.ypos + self.advance
     if self.ypos > self.rows then
-      self.ypos = self.ypos - self.rows
+      if self.cfg.wrapAtBottom then 
+        self.ypos = self.ypos - self.rows
+      else
+        self.ypos = self.rows
+      end
     end
   end
 end
