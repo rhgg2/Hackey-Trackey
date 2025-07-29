@@ -2705,7 +2705,7 @@ function tracker:linkData()
   datafield[#datafield+1] = 'legato'
   idx[#idx+1]             = 0
   colsizes[#colsizes+1]   = 1
-  padsizes[#padsizes+1]   = 1
+  padsizes[#padsizes+1]   = 2
   grouplink[#grouplink+1] = {0}
   headers[#headers+1]     = string.format( 'L' )
   headerW[#headerW+1]     = 1
@@ -2927,7 +2927,7 @@ function tracker:updatePlotLink()
   plotData.indicatorShiftY = dy + plotData.itempady
 
   self.extracols = {}
-  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints = self:grabLinkage()
+  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
   self.max_xpos = #headers
   self.max_ypos = self.rows
 
@@ -2939,13 +2939,19 @@ function tracker:updatePlotLink()
   local xspace = {}
   local dlink = {}
   local glink = {}
+  local blockLeft = {}
+  local blockRight = {}
   local header = {}
   local headerWidths = {}
   local description = {}
   local x = originx
 --  for j = fov.scrollx+1,math.min(#colsizes,fov.width+fov.scrollx) do
   local q = 0
+  local masters = {}
   for j = fov.scrollx+1,#colsizes do
+    if (master[j] == 1) then
+      masters[#xloc + 1] = true
+    end
     xloc[#xloc + 1] = x
     xwidth[#xwidth + 1] = colsizes[j] * dx
     xlink[#xlink + 1] = idxfields[j]
@@ -2966,6 +2972,18 @@ function tracker:updatePlotLink()
       break
     end
   end
+  for j = 1, #xloc do
+    local k = j
+    while (k > 1 and not masters[k]) do
+      k = k -1
+    end
+    blockLeft[j] = k
+    k = j + 1
+    while (k < #xloc+1 and not masters[k]) do
+      k = k + 1
+    end
+    blockRight[j] = k-1
+  end
   
   fov.width = q-fov.scrollx
   plotData.xloc = xloc
@@ -2977,6 +2995,8 @@ function tracker:updatePlotLink()
   plotData.dlink = dlink
   plotData.xlink = xlink
   plotData.xspace = xspace
+  plotData.blockLeft = blockLeft
+  plotData.blockRight = blockRight
   plotData.glink = glink
   plotData.headers = header
   plotData.headerW = headerWidths
@@ -3684,6 +3704,8 @@ function tracker:renderGUI()
   local dlink         = plotData.dlink
   local xlink         = plotData.xlink
   local xspace        = plotData.xspace
+  local blockLeft     = plotData.blockLeft
+  local blockRight    = plotData.blockRight
   local glink         = plotData.glink
   local description   = plotData.description
   local headers       = plotData.headers
@@ -3984,8 +4006,12 @@ function tracker:renderGUI()
     gfx.set(table.unpack(colors.copypaste))
     if ( cp.all == 0 ) then
       gfx.rect(xloc[xmi]-1, yloc[yl] - plotData.yshift, xloc[xma] + xwidth[xma] - xloc[xmi], yloc[ye]-yloc[yl]+yheight[ye]+itempady )
-    else
+    elseif ( cp.all == 1) then
       gfx.rect(xloc[1] - itempadx-1, yloc[yl] - plotData.yshift, tw, yloc[ye]-yloc[yl]+yheight[ye]+itempady )
+    else
+      xmi = blockLeft[xmi]
+      xma = blockRight[xma]
+      gfx.rect(xloc[xmi]-1, yloc[yl] - plotData.yshift, xloc[xma] + xwidth[xma] - xloc[xmi], yloc[ye]-yloc[yl]+yheight[ye]+itempady )
     end
   end
 
@@ -4777,7 +4803,7 @@ end
 -- Shift operator
 ---------------------
 function tracker:shiftAt( x, y, shift, scale, onlyNotes )
-  local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = self:grabLinkage()
   local noteStart = self.data.noteStart
   local notes = self.notes
 
@@ -6677,7 +6703,7 @@ function tracker:updateNoteSelection()
   
       if ( reaper.ValidatePtr2(0, self.take, "MediaItem_Take*") ) then
       
-        local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+        local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = self:grabLinkage()
         local data      = self.data
         local noteGrid  = data.note
         local noteStart = data.noteStart
@@ -7915,7 +7941,7 @@ end
 -- Clear the data in a block
 ------------------
 function tracker:clearBlock(incp, cleanOffs)
-  local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = self:grabLinkage()
   local data      = self.data
   local notes     = self.notes
   local noteGrid  = data.note
@@ -7933,6 +7959,13 @@ function tracker:clearBlock(incp, cleanOffs)
   if ( cp.all == 1 ) then
     xstart = 1
     xstop = #datafields
+  elseif ( cp.all == 2) then
+    while (xstart > 1 and master[xstart] == 0) do
+      xstart = xstart - 1
+    end
+    while (xstop < #datafields and master[xstop+1] == 0) do
+      xstop = xstop + 1
+    end
   end
   
   local ystop = math.min(cp.ystop, rows);
@@ -7991,7 +8024,7 @@ end
 -- Mend block (check if notes at top can be extended)
 ------------------
 function tracker:mendBlock(incp)
-  local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = self:grabLinkage()
   local data      = self.data
   local noteGrid  = data.note
   local noteStart = data.noteStart
@@ -8006,6 +8039,13 @@ function tracker:mendBlock(incp)
   if ( cp.all == 1 ) then
     xstart = 1
     xstop = #datafields
+  elseif ( cp.all == 2) then
+    while (xstart > 1 and master[xstart] == 0) do
+      xstart = xstart - 1
+    end
+    while (xstop < #datafields and master[xstop+1] == 0) do
+      xstop = xstop + 1
+    end
   end
 
   for jx = xstart, xstop do
@@ -8154,7 +8194,7 @@ function tracker:pasteClipboard()
   end
 
   local channels  = clipboard.channels
-  local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = self:grabLinkage()
   local refrow    = self.ypos - 1
   local refppq    = self:rowToPpq( self.ypos - 1 ) - clipboard.refppq
 
@@ -8323,7 +8363,7 @@ end
 function tracker:copyToClipboard()
 
   local newclipboard = {}
-  local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = self:grabLinkage()
   local data      = self.data
   local noteGrid  = data.note
   local noteStart = data.noteStart
@@ -8347,9 +8387,19 @@ function tracker:copyToClipboard()
 
   local xstart = cp.xstart
   local xstop = cp.xstop
+
   if ( cp.all == 1 ) then
     xstart = 1
     xstop = #datafields
+  elseif ( cp.all == 2) then
+    while (xstart > 1 and master[xstart] == 0) do
+      print(master[xstart])
+      xstart = xstart - 1
+    end
+    while (xstop < #datafields and master[xstop+1] == 0) do
+      print(master[xstop+1])
+      xstop = xstop + 1
+    end
   end
 
   -- All we should be copying is note starts and note stops
@@ -8469,7 +8519,7 @@ function tracker:forceUpdate()
 end
 
 function tracker:interpolate()
-  local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = self:grabLinkage()
   local data      = self.data
   local noteGrid  = data.note
   local noteStart = data.noteStart
@@ -8646,7 +8696,7 @@ end
 function tracker:beginBlock()
   local cp = self.cp
   if ( cp.ystart == self.ypos ) then
-    cp.all = 1 - cp.all
+    cp.all = (cp.all > 0 and cp.all - 1 or 2)
   end
   cp.xstart = self.xpos
   cp.ystart = self.ypos
@@ -8666,7 +8716,7 @@ function tracker:endBlock()
     self:resetBlock()
   end
   if ( ( cp.ystop == self.ypos ) and ( cp.xstop == self.xpos ) ) then
-    cp.all = 1 - cp.all
+    cp.all = (cp.all > 0 and cp.all - 1 or 2)
   end
   cp.xstop = self.xpos
   cp.ystop = self.ypos
@@ -8915,7 +8965,7 @@ end
 function tracker:insertChord(chord)
   --reaper.StuffMIDIMessage(0, 0x90 + v[1] - 1, v[2], v[3])
 
-  local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = self:grabLinkage()
 
   -- Grab references here, since clearblock calls update and regenerates them
   local data      = self.data
@@ -9772,7 +9822,7 @@ tracker.leading_cols = {
  
  
 function tracker:seek_leading_col(xp, dir)
-  local datafields, padsizes, colsizes, idxfields, headers, grouplink = tracker:grabLinkage()
+  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
   local attempts = 0
   
   -- Find the leading field for this type
@@ -9791,7 +9841,7 @@ function tracker:seek_leading_col(xp, dir)
 end
 
 function tracker:seek_until_different_leading_col(xp, dir)
-  local datafields, padsizes, colsizes, idxfields, headers, grouplink = tracker:grabLinkage()
+  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
   local attempts = 0
   
   -- Find the leading field for this type
@@ -9810,7 +9860,7 @@ function tracker:seek_until_different_leading_col(xp, dir)
 end
 
 function tracker:insert_hori()
-  local datafields, padsizes, colsizes, idxfields, headers, grouplink = tracker:grabLinkage()
+  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
   
   -- Has to have an index to be shifted
   if idxfields[self.xpos] == 0 then
@@ -9825,7 +9875,7 @@ function tracker:insert_hori()
 end
 
 function tracker:remove_hori()
-  local datafields, padsizes, colsizes, idxfields, headers, grouplink = tracker:grabLinkage()
+  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
   
   -- Has to have an index to be shifted
   if idxfields[self.xpos] == 0 then
@@ -10003,7 +10053,7 @@ function tracker:processKeyboardInput()
       self:deleteNow()
       reaper.MIDI_Sort(self.take)
     elseif inputs('off2') and self.take then
-      local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
   
       if ( datafields[self.xpos] == "text" ) then
         modified = 1
@@ -10039,7 +10089,7 @@ function tracker:processKeyboardInput()
     elseif ( inputs('deleteRow') and self.take ) then
       modified = 1
       reaper.Undo_OnStateChange2(0, "Tracker: Delete row (Del)")
-      local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+      local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
       self:clearBlock({xstart=1, ystart=self.ypos, xstop=#datafields, ystop=self.ypos})
       self:mendBlock({xstart=1, ystart=self.ypos, xstop=#datafields, ystop=self.ypos})
       self:deleteNow()
@@ -10049,7 +10099,7 @@ function tracker:processKeyboardInput()
       modified = 1
       reaper.Undo_OnStateChange2(0, "Tracker: Insert Row")
       local cpS = self:saveClipboard()
-      local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+      local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
       self.cp = {xstart=1, ystart=self.ypos, xstop=#datafields, ystop=self.rows-1}
       reaper.MarkProjectDirty(0)
       self:cutBlock()
@@ -10068,7 +10118,7 @@ function tracker:processKeyboardInput()
       modified = 1
       reaper.Undo_OnStateChange2(0, "Tracker: Remove Row")
       local cpS = self:saveClipboard()
-      local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+      local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
       self.cp = {xstart=1, ystart=self.ypos+1, xstop=#datafields, ystop=self.rows}
       reaper.MarkProjectDirty(0)
       self:cutBlock()
@@ -10095,7 +10145,7 @@ function tracker:processKeyboardInput()
       local cpS = self:saveClipboard()
   
       -- Cut  last line to a special clipboard
-      local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+      local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
       self.cp = {xstart=1, ystart=self.rows, xstop=#datafields, ystop=self.rows}
       reaper.MarkProjectDirty(0)
       self:cutBlock()
@@ -10132,7 +10182,7 @@ function tracker:processKeyboardInput()
       local cpS   = self:saveClipboard()
   
       -- Cut block to special clipboard
-      local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+      local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
       self.cp = {xstart=1, ystart=2, xstop=#datafields, ystop=self.rows}
       reaper.MarkProjectDirty(0)
       self:cutBlock()
@@ -10244,7 +10294,7 @@ function tracker:processKeyboardInput()
       self:copyBlock()
       self.cp = oldcp
     elseif inputs('copyPattern') and self.take then
-      local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+      local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
       local oldcp = self.cp
       self.cp = {xstart=1, ystart=1, xstop=#datafields, ystop=self.rows}
       self:copyBlock()
@@ -10267,7 +10317,7 @@ function tracker:processKeyboardInput()
     elseif inputs('cutPattern') and self.take then
       modified = 1
       reaper.Undo_OnStateChange2(0, "Tracker: Cut pattern")
-      local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+      local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
       local oldcp = self.cp
       self.cp = {xstart=1, ystart=1, xstop=#datafields, ystop=self.rows}
       reaper.MarkProjectDirty(0)
@@ -10315,7 +10365,7 @@ function tracker:processKeyboardInput()
       self:shiftup({xstart=self.xpos, ystart=1, xstop=self.xpos, ystop=self.rows})
     elseif inputs('shpatdown') and self.take then
       modified = 1
-      local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+      local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
       local x = 1
       while ( x < #datafields ) do
         if ( datafields[x] == 'text' ) then
@@ -10326,7 +10376,7 @@ function tracker:processKeyboardInput()
       self:shiftdown({xstart=x, ystart=1, xstop=#datafields, ystop=self.rows}, 1)
     elseif inputs('shpatup') and self.take then
       modified = 1
-      local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+      local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
       local x = 1
       while ( x < #datafields ) do
         if ( datafields[x] == 'text' ) then
@@ -10343,7 +10393,7 @@ function tracker:processKeyboardInput()
       self:shiftup({xstart=self.xpos, ystart=1, xstop=self.xpos, ystop=self.rows}, 1, 12)
     elseif inputs('patternOctDown') and self.take then
       modified = 1
-      local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+      local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
       local x = 1
       while ( x < #datafields ) do
         if ( datafields[x] == 'text' ) then
@@ -10354,7 +10404,7 @@ function tracker:processKeyboardInput()
       self:shiftdown({xstart=x, ystart=1, xstop=#datafields, ystop=self.rows}, 1, 12)
     elseif inputs('patternOctUp') and self.take then
       modified = 1
-      local datafields, padsizes, colsizes, idxfields, headers, grouplink = self:grabLinkage()
+      local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = tracker:grabLinkage()
       local x = 1
       while ( x < #datafields ) do
         if ( datafields[x] == 'text' ) then
