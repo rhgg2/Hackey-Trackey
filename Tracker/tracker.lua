@@ -915,6 +915,7 @@ tracker.cfg.showAvgFrameTime = 0
 tracker.cfg.buzzNoteCols = 0
 tracker.cfg.wrapAtBottom = 0
 tracker.cfg.playWillStop = 1
+tracker.cfg.visualSpace = 0
 
 tracker.tracker_samples = 0
 tracker.cfg.fixedIndicator = 0
@@ -974,6 +975,7 @@ tracker.binaryOptions = {
     { 'buzzNoteCols', 'Buzz-style note columns' },
     { 'wrapAtBottom', 'Wrap cursor on advancing past pattern end' },
     { 'playWillStop', 'Does \"play\" toggle playback state?' },
+    { 'visualSpace', 'Visual space between columns' },
     }
 
 tracker.colorschemes = {"default", "buzz", "it", "hacker", "renoise", "renoiseB", "renoiseC", "buzz2", "sink", "TonE"}
@@ -2581,6 +2583,7 @@ function tracker:linkCC_channel(modmode, ch, data, master, datafield, idx, colsi
     -- Display with CC commands separated per column
     local allmodtypes = data.modtypes
     if ( not allmodtypes ) then
+      padsizes[#padsizes] = 2
       return
     end
 
@@ -2650,8 +2653,8 @@ function tracker:linkCC_channel(modmode, ch, data, master, datafield, idx, colsi
           end
         end
       end
-      padsizes[#padsizes] = 2
     end
+    padsizes[#padsizes] = 2
   end
 end
 
@@ -2805,7 +2808,7 @@ function tracker:linkData()
       headerW[#headerW+1]     = 0
       hints[#hints+1]         = string.format('Velocity channel %2d', j + channelOffset)
     else
-      padsizes[#padsizes] = 2
+      padsizes[#padsizes] = 2 - math.max(self.cfg.channelCCs, self.tracker_samples)
     end
 
     if ( math.max(self.cfg.channelCCs, self.tracker_samples) == 1 ) then
@@ -2964,8 +2967,9 @@ function tracker:updatePlotLink()
     description[#hints + 1] = hints[j]
     x = x + colsizes[j] * dx + padsizes[j] * dx
     q = j
-    if (padsizes[j] > 1) then
-      xspace[#xspace + 1] = x - ((padsizes[j] + 1) * dx / 2)
+    if (padsizes[j] > 1) and (self.cfg.visualSpace == 1) then
+      x = x - dx
+      xspace[#xspace + 1] = x - (padsizes[j] * dx / 2)
     else
       xspace[#xspace + 1] = 0
     end
