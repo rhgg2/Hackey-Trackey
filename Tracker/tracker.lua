@@ -5060,7 +5060,11 @@ function tracker:showLess()
     self.hash = 0
   end
   if ( ( ftype == 'text' ) or ( ftype == 'octave' ) or ( ftype == 'vel1' ) or ( ftype == 'vel2' ) or ( ftype == 'delay1' ) or ( ftype == 'delay2' ) ) then
-    self.showDelays[chan] = 0
+    if ( self.showEnd[chan] == 1 ) then
+      self.showEnd[chan] = 0
+    else
+      self.showDelays[chan] = 0
+    end
     self.hash = 0
   end
   if ( ( ftype == 'modtxt1' ) or ( ftype == 'modtxt2' ) ) then
