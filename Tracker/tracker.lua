@@ -842,6 +842,7 @@ tracker.cp.ystart = -1
 tracker.cp.xstop = -1
 tracker.cp.ystop = -1
 tracker.cp.all = 0
+tracker.cp.swapped = 0
 
 tracker.showMod = 1
 tracker.lastmodval = 0
@@ -1554,6 +1555,7 @@ function tracker:loadKeys( keySet )
     keys.cutBlock       = { 1,    0,  0,    24 }            -- CTRL + X
     keys.pasteBlock     = { 1,    0,  0,    22 }            -- CTRL + V
     keys.copyBlock      = { 1,    0,  0,    3 }             -- CTRL + C
+    keys.resetBlock     = { 1,    0,  0,    21 }            -- CTRL + U
     keys.shiftItemUp    = { 0,    0,  1,    43 }            -- SHIFT + Num pad +
     keys.shiftItemDown  = { 0,    0,  1,    45 }            -- SHIFT + Num pad -
     keys.scaleUp        = { 1,    1,  1,    267 }           -- CTRL + SHIFT + ALT + Num pad +
@@ -1670,6 +1672,7 @@ function tracker:loadKeys( keySet )
       { 'CTRL + B/E', 'Selection begin/End' },
       { 'SHIFT + Arrow Keys', 'Block selection' },
       { 'CTRL + C/X/V', 'Copy / Cut / Paste' },
+      { 'CTRL + U', 'Clear selection' },
       { 'CTRL + I', 'Interpolate' },
       { 'Shift + Del', 'Delete block' },
       { 'CTRL + (SHIFT) + Z', 'Undo / Redo' },
@@ -1734,6 +1737,7 @@ function tracker:loadKeys( keySet )
     keys.cutBlock       = { 1,    0,  0,    24 }            -- CTRL + X
     keys.pasteBlock     = { 1,    0,  0,    22 }            -- CTRL + V
     keys.copyBlock      = { 1,    0,  0,    3 }             -- CTRL + C
+    keys.resetBlock     = { 1,    0,  0,    21 }            -- CTRL + U
     keys.shiftItemUp    = { 0,    0,  1,    43 }            -- SHIFT + Num pad+
     keys.shiftItemDown  = { 0,    0,  1,    45 }            -- SHIFT + Num pad-
     keys.octaveup       = { 0,    0,  0,    42 }            -- *
@@ -1846,6 +1850,7 @@ function tracker:loadKeys( keySet )
       { 'CTRL + B/E', 'Selection Begin/End' },
       { 'SHIFT + Arrow Keys', 'Block selection' },
       { 'CTRL + C/X/V', 'Copy / Cut / Paste' },
+      { 'CTRL + U', 'Clear selection' },
       { 'CTRL + I', 'Interpolate' },
       { 'Shift + Del', 'Delete block' },
       { 'CTRL + (SHIFT) + Z', 'Undo / Redo' },
@@ -1913,6 +1918,7 @@ function tracker:loadKeys( keySet )
     keys.cutBlock       = { 1,    0,  0,    24 }            -- CTRL + X
     keys.pasteBlock     = { 1,    0,  0,    22 }            -- CTRL + V
     keys.copyBlock      = { 1,    0,  0,    3 }             -- CTRL + C
+    keys.resetBlock     = { 1,    0,  0,    21 }            -- CTRL + U
     keys.shiftItemUp    = { 0,    0,  1,    43 }            -- SHIFT + Num pad+
     keys.shiftItemDown  = { 0,    0,  1,    45 }            -- SHIFT + Num pad-
     keys.octaveup       = { 0,    0,  0,    42 }            -- *
@@ -2033,6 +2039,7 @@ function tracker:loadKeys( keySet )
       { 'CTRL + B/E', 'Selection Begin/End' },
       { 'SHIFT + Arrow Keys', 'Block selection' },
       { 'CTRL + C/X/V', 'Copy / Cut / Paste' },
+      { 'CTRL + U', 'Clear selection' },
       { 'CTRL + I', 'Interpolate' },
       { 'Shift + Del', 'Delete block' },
       { 'CTRL + (SHIFT) + Z', 'Undo / Redo' },
@@ -2944,19 +2951,14 @@ function tracker:updatePlotLink()
   local xspace = {}
   local dlink = {}
   local glink = {}
-  local blockLeft = {}
-  local blockRight = {}
   local header = {}
   local headerWidths = {}
   local description = {}
   local x = originx
 --  for j = fov.scrollx+1,math.min(#colsizes,fov.width+fov.scrollx) do
   local q = 0
-  local masters = {}
+
   for j = fov.scrollx+1,#colsizes do
-    if (master[j] == 1) then
-      masters[#xloc + 1] = true
-    end
     xloc[#xloc + 1] = x
     xwidth[#xwidth + 1] = colsizes[j] * dx
     xlink[#xlink + 1] = idxfields[j]
@@ -2974,21 +2976,9 @@ function tracker:updatePlotLink()
       xspace[#xspace + 1] = 0
     end
 
-    if ( (x-2*grid.itempadx) > (fov.abswidth-1.5*originx) ) then
+    if ( (x-2*grid.itempadx) > (fov.abswidth-1.5*originx) and datafields[j] ~= 'text' ) then
       break
     end
-  end
-  for j = 1, #xloc do
-    local k = j
-    while (k > 1 and not masters[k]) do
-      k = k -1
-    end
-    blockLeft[j] = k
-    k = j + 1
-    while (k < #xloc+1 and not masters[k]) do
-      k = k + 1
-    end
-    blockRight[j] = k-1
   end
   
   fov.width = q-fov.scrollx
@@ -3001,8 +2991,6 @@ function tracker:updatePlotLink()
   plotData.dlink = dlink
   plotData.xlink = xlink
   plotData.xspace = xspace
-  plotData.blockLeft = blockLeft
-  plotData.blockRight = blockRight
   plotData.glink = glink
   plotData.headers = header
   plotData.headerW = headerWidths
@@ -3710,8 +3698,6 @@ function tracker:renderGUI()
   local dlink         = plotData.dlink
   local xlink         = plotData.xlink
   local xspace        = plotData.xspace
-  local blockLeft     = plotData.blockLeft
-  local blockRight    = plotData.blockRight
   local glink         = plotData.glink
   local description   = plotData.description
   local headers       = plotData.headers
@@ -4010,13 +3996,7 @@ function tracker:renderGUI()
     yl = math.min(yl, #yloc)
     
     gfx.set(table.unpack(colors.copypaste))
-    if ( cp.all == 0 ) then
-      gfx.rect(xloc[xmi]-1, yloc[yl] - plotData.yshift, xloc[xma] + xwidth[xma] - xloc[xmi], yloc[ye]-yloc[yl]+yheight[ye]+itempady )
-    elseif ( cp.all == 1) then
-      gfx.rect(xloc[1] - itempadx-1, yloc[yl] - plotData.yshift, tw, yloc[ye]-yloc[yl]+yheight[ye]+itempady )
-    else
-      xmi = blockLeft[xmi]
-      xma = blockRight[xma]
+    if (cp.xstart < fov.scrollx + fov.width) and (cp.xstop > fov.scrollx) and (cp.ystart < fov.scrolly + fov.width) and (cp.ystop > fov.scrolly) then
       gfx.rect(xloc[xmi]-1, yloc[yl] - plotData.yshift, xloc[xma] + xwidth[xma] - xloc[xmi], yloc[ye]-yloc[yl]+yheight[ye]+itempady )
     end
   end
@@ -7966,17 +7946,6 @@ function tracker:clearBlock(incp, cleanOffs)
 
   local xstart = cp.xstart
   local xstop = cp.xstop
-  if ( cp.all == 1 ) then
-    xstart = 1
-    xstop = #datafields
-  elseif ( cp.all == 2) then
-    while (xstart > 1 and master[xstart] == 0) do
-      xstart = xstart - 1
-    end
-    while (xstop < #datafields and master[xstop+1] == 0) do
-      xstop = xstop + 1
-    end
-  end
   
   local ystop = math.min(cp.ystop, rows);
 
@@ -8046,17 +8015,6 @@ function tracker:mendBlock(incp)
 
   local xstart = cp.xstart
   local xstop = cp.xstop
-  if ( cp.all == 1 ) then
-    xstart = 1
-    xstop = #datafields
-  elseif ( cp.all == 2) then
-    while (xstart > 1 and master[xstart] == 0) do
-      xstart = xstart - 1
-    end
-    while (xstop < #datafields and master[xstop+1] == 0) do
-      xstop = xstop + 1
-    end
-  end
 
   for jx = xstart, xstop do
     local chan = idxfields[ jx ]
@@ -8213,9 +8171,18 @@ function tracker:pasteClipboard()
   end
 
   local fieldCount = #channels
-  
   local start_xpos = self.xpos
-  if (clipboard.region.all == 1) then
+
+  if (clipboard.region.all == 2) then
+    while (start_xpos > 1 and master[start_xpos] == 0) do
+      start_xpos = start_xpos - 1
+    end
+  elseif (clipboard.region.all == 3) then
+    start_xpos = 1
+    while (start_xpos < #datafields and datafields[start_xpos] ~= 'text') do
+      start_xpos = start_xpos + 1
+    end
+  elseif (clipboard.region.all == 4) then
     start_xpos = 1
   end
   
@@ -8389,6 +8356,7 @@ function tracker:copyToClipboard()
     cp.xstop = self.xpos
     cp.ystop = self.ypos
     cp.all = 0
+    cp.swapped = 0
   end
 
   newclipboard.refppq = self:rowToPpq( cp.ystart - 1 )
@@ -8397,20 +8365,6 @@ function tracker:copyToClipboard()
 
   local xstart = cp.xstart
   local xstop = cp.xstop
-
-  if ( cp.all == 1 ) then
-    xstart = 1
-    xstop = #datafields
-  elseif ( cp.all == 2) then
-    while (xstart > 1 and master[xstart] == 0) do
-      print(master[xstart])
-      xstart = xstart - 1
-    end
-    while (xstop < #datafields and master[xstop+1] == 0) do
-      print(master[xstop+1])
-      xstop = xstop + 1
-    end
-  end
 
   -- All we should be copying is note starts and note stops
   local jx = xstart
@@ -8651,19 +8605,22 @@ end
 
 function tracker:resetShiftSelect()
   local cp = self.cp
+
   self:forceCursorInRange()
-  
-  if cp.ystart > -1 then
-    cp.changed = 1
-  end
-  
-  if ( cp.lastShiftCoord ) then
-    cp.lastShiftCoord = nil
-    self:resetBlock()
+  if cp.all == 0 then
+    if cp.ystart > -1 then
+      cp.changed = 1
+    end
+    
+    if ( cp.lastShiftCoord ) then
+      cp.lastShiftCoord = nil
+      self:resetBlock()
+    end
   end
 end
 
-function tracker:dragBlock(cx, cy)
+
+function tracker:startBlock(cx, cy)
   local cp = self.cp
   local xp, yp
   if ( not cx ) then
@@ -8679,42 +8636,88 @@ function tracker:dragBlock(cx, cy)
     cp.lastShiftCoord.x = xp
     cp.lastShiftCoord.y = yp
   end
-  local xstart, xend, ystart, yend
-  if ( xp > cp.lastShiftCoord.x ) then
-    xstart  = cp.lastShiftCoord.x
-    xend    = xp
+end
+  
+function tracker:dragBlock(cx, cy)
+  local cp = self.cp
+  local xp, yp
+  if ( not cx ) then
+    xp = tracker.xpos
+    yp = tracker.ypos
   else
-    xstart  = xp
-    xend    = cp.lastShiftCoord.x
-  end
-  if ( yp > cp.lastShiftCoord.y ) then
-    ystart  = cp.lastShiftCoord.y
-    yend    = yp
-  else
-    ystart  = yp
-    yend    = cp.lastShiftCoord.y
+    xp = cx
+    yp = cy
   end
 
-  cp.xstart  = xstart
-  cp.xstop   = xend
-  cp.all     = 0
-  cp.ystart  = ystart
-  cp.ystop   = yend
-  cp.changed = 1
+  if (xp ~= cp.lastShiftCoord.x) or (yp ~= cp.lastShiftCoord.y) or (cp.xstart ~= -1) then
+    local xstart, xend, ystart, yend
+    if ( xp > cp.lastShiftCoord.x ) then
+      xstart  = cp.lastShiftCoord.x
+      xend    = xp
+    else
+      xstart  = xp
+      xend    = cp.lastShiftCoord.x
+    end
+    if ( yp > cp.lastShiftCoord.y ) then
+      ystart  = cp.lastShiftCoord.y
+      yend    = yp
+    else
+      ystart  = yp
+      yend    = cp.lastShiftCoord.y
+    end
+
+    cp.xstart  = xstart
+    cp.xstop   = xend
+    cp.all     = 0
+    cp.ystart  = ystart
+    cp.ystop   = yend
+    cp.changed = 1
+    cp.swapped = 0
+  end
 end
 
 function tracker:beginBlock()
   local cp = self.cp
-  if ( cp.ystart == self.ypos ) then
-    cp.all = (cp.all > 0 and cp.all - 1 or 2)
+  local datafields, padsizes, colsizes, idxfields, headers, headerW, grouplink, hints, master = self:grabLinkage()
+  
+  if cp.swapped == 1 then
+    cp.ystart, cp.ystop = cp.ystop, cp.ystart
   end
+
   cp.xstart = self.xpos
-  cp.ystart = self.ypos
-  if ( cp.ystart > cp.ystop ) then
-    cp.ystop  = self.ypos
+  cp.xstop = self.xpos
+
+  if cp.all == 0 then
+    cp.all = 1
+    cp.ystop = self.ypos
+  else
+    if cp.ystart == self.ypos then cp.all = math.fmod(cp.all,4)+1 end
+    if cp.all == 2 then
+      while (cp.xstart > 1 and master[cp.xstart] == 0) do
+        cp.xstart = cp.xstart - 1
+      end
+      while (cp.xstop < #datafields and master[cp.xstop+1] == 0) do
+        cp.xstop = cp.xstop + 1
+      end
+    elseif cp.all == 3 then
+      cp.xstart = 1
+      while (cp.xstart < #datafields and datafields[cp.xstart] ~= 'text') do
+        cp.xstart = cp.xstart + 1
+      end
+      cp.xstop = #datafields
+    elseif cp.all == 4 then
+      cp.xstart = 1
+      cp.xstop = #datafields
+    end
   end
-  if ( cp.xstart > cp.xstop ) then
-    cp.xstop  = self.xpos
+    
+  cp.ystart = self.ypos
+  
+  if ( cp.ystart > cp.ystop ) then
+    cp.ystart, cp.ystop = cp.ystop, cp.ystart
+    cp.swapped = 1
+  else
+    cp.swapped = 0
   end
 
   cp.lastShiftCoord = nil
@@ -8722,16 +8725,9 @@ end
 
 function tracker:endBlock()
   local cp = self.cp
-  if ( self.ypos < cp.ystart ) then
-    self:resetBlock()
-  end
-  if ( ( cp.ystop == self.ypos ) and ( cp.xstop == self.xpos ) ) then
-    cp.all = (cp.all > 0 and cp.all - 1 or 2)
-  end
-  cp.xstop = self.xpos
-  cp.ystop = self.ypos
-
-  cp.lastShiftCoord = nil
+  cp.swapped = 1 - cp.swapped
+  self:beginBlock()
+  cp.swapped = 1 - cp.swapped
 end
 
 function tracker:resetBlock()
@@ -8741,6 +8737,7 @@ function tracker:resetBlock()
   cp.all     =  0
   cp.xstart  = -1
   cp.xstop   = -1
+  cp.swapped =  0
 end
 
 function tracker:cutBlock()
@@ -8751,7 +8748,6 @@ end
 
 function tracker:pasteBlock()
   self:pasteClipboard()
-  self:resetBlock()
 end
 
 function tracker:copyBlock()
@@ -10004,41 +10000,41 @@ function tracker:processKeyboardInput()
       self:advanceCursor()
       self:resetShiftSelect()
     elseif inputs('shiftleft') and self.take then
-      self:dragBlock()
+      self:startBlock()
       self.xpos = self.xpos - 1
       self:forceCursorInRange()
       self:dragBlock()
     elseif inputs('shiftright') and self.take then
-      self:dragBlock()
+      self:startBlock()
       self.xpos = self.xpos + 1
       self:forceCursorInRange()
       self:dragBlock()
     elseif inputs('shiftup') and self.take then
-      self:dragBlock()
+      self:startBlock()
       self.ypos = self.ypos - 1
       self:forceCursorInRange()
       self:dragBlock()
     elseif inputs('shiftdown') and self.take then
-      self:dragBlock()
+      self:startBlock()
       self.ypos = self.ypos + 1
       self:forceCursorInRange()
       self:dragBlock()
     elseif inputs('shiftpgdn') and self.take then
-      self:dragBlock()
+      self:startBlock()
       self.ypos = self.ypos + self.cfg.page
       self:forceCursorInRange()
       self:dragBlock()
     elseif inputs('shiftpgup') and self.take then
-      self:dragBlock()
+      self:startBlock()
       self.ypos = self.ypos - self.cfg.page
       self:forceCursorInRange()
       self:dragBlock()
     elseif inputs('shiftFullLeft') and self.take then
-      self:dragBlock()
+      self:startBlock()
       self.xpos = 1
       self:dragBlock()
     elseif inputs('shiftFullRight') and self.take then
-      self:dragBlock()
+      self:startBlock()
       self.xpos = self.max_xpos
       self:dragBlock()
     elseif inputs('fullLeft') and self.take then
@@ -10046,12 +10042,12 @@ function tracker:processKeyboardInput()
     elseif inputs('fullRight') and self.take then
       self.xpos = self.max_xpos
     elseif inputs('shifthome') and self.take then
-      self:dragBlock()
+      self:startBlock()
       self.ypos = 0
       self:forceCursorInRange()
       self:dragBlock()
     elseif inputs('shiftend') and self.take then
-      self:dragBlock()
+      self:startBlock()
       self.ypos = self.rows
       self:forceCursorInRange()
       self:dragBlock()
@@ -10303,6 +10299,8 @@ function tracker:processKeyboardInput()
       self:endBlock()
     elseif ( inputs('copyBlock') or inputs('copyBlock2') ) and self.take then
       self:copyBlock()
+    elseif inputs('resetBlock') and self.take then
+      self:resetBlock()
     elseif inputs('copyColumn') and self.take then
       local oldcp = self.cp
       self.cp = {xstart=self.xpos, ystart=1, xstop=self.xpos, ystop=self.rows}
@@ -11233,25 +11231,12 @@ local function updateLoop()
         tracker:resetShiftSelect()
         tracker.xpos = Inew
         if ( tracker.cfg.fixedIndicator ~= 1 ) then
-          tracker:dragBlock(Inew, Jnew)
+          tracker:startBlock(Inew, Jnew)
           tracker.ypos = Jnew
         end
       elseif (mouse_cap == CaptureModes.SELECT_BLOCK) then
         -- Change selection if it wasn't the initial click
         tracker:dragBlock(Inew, Jnew)
-        if outsidePattern then
-          if outsidePattern & 1 == 1 then
-            tracker.xpos = Inew - 1
-          elseif outsidePattern & 2 == 2 then
-            tracker.xpos = Inew + 1
-          end
-          
-          if outsidePattern & 4 == 4 then
-            tracker.ypos = Jnew + 1
-          elseif outsidePattern & 8 == 8 then
-            tracker.ypos = Jnew - 1
-          end
-        end
       end
     end
 
@@ -11864,6 +11849,7 @@ local function Main()
     keys.cutBlock       = { 1,    0,  0,    24 }            -- CTRL + X
     keys.pasteBlock     = { 1,    0,  0,    22 }            -- CTRL + V
     keys.copyBlock      = { 1,    0,  0,    3 }             -- CTRL + C
+    keys.resetBlock     = { 1,    0,  0,    21 }            -- CTRL + U
     keys.shiftItemUp    = { 0,    0,  1,    43 }            -- SHIFT + Num pad +
     keys.shiftItemDown  = { 0,    0,  1,    45 }            -- SHIFT + Num pad -
     keys.scaleUp        = { 1,    1,  1,    267 }           -- CTRL + SHIFT + ALT + Num pad +
@@ -11988,6 +11974,7 @@ local function Main()
       { 'CTRL + B/E', 'Selection begin/End' },
       { 'SHIFT + Arrow Keys', 'Block selection' },
       { 'CTRL + C/X/V', 'Copy / Cut / Paste' },
+      { 'CTRL + U', 'Clear selection' },
       { 'CTRL + I', 'Interpolate' },
       { 'Shift + Del', 'Delete block' },
       { 'CTRL + (SHIFT) + Z', 'Undo / Redo' },
