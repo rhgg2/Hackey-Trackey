@@ -931,6 +931,7 @@ tracker.cfg.buzzNoteCols = 0
 tracker.cfg.wrapAtBottom = 0
 tracker.cfg.playWillStop = 1
 tracker.cfg.visualSpace = 0
+tracker.cfg.noteEndsAtEnd = 0
 
 tracker.tracker_samples = 0
 tracker.cfg.fixedIndicator = 0
@@ -991,6 +992,7 @@ tracker.binaryOptions = {
     { 'wrapAtBottom', 'Wrap cursor on advancing past pattern end' },
     { 'playWillStop', 'Does \"play\" toggle playback state?' },
     { 'visualSpace', 'Visual space between columns' },
+    { 'noteEndsAtEnd', 'Show note ends at end of note' },
     }
 
 tracker.colorschemes = {"default", "buzz", "it", "hacker", "renoise", "renoiseB", "renoiseC", "buzz2", "sink", "TonE"}
@@ -4993,9 +4995,12 @@ function tracker:getNoteEnd( note )
   return self:ppqToEnd( endppqpos )
 end
 
-function tracker:setNoteEnd( note, newEnd )
+function tracker:setNoteEnd( note, newEnd, newRows )
   local notes = self.notes
   local pitch, vel, startppqpos, endppqpos = table.unpack( notes[note] )
+  if ( newRows ) then
+    endppqpos = self:rowToPpq(newRows + self:ppqToRow(startppqpos))
+  end
   local newendppq = self:endToPpq( endppqpos, newEnd )
   if ( newendppq > startppqpos ) then
     reaper.MIDI_SetNote(self.take, note, nil, nil, nil, newendppq, nil, nil, nil, true)
@@ -5018,7 +5023,7 @@ function tracker:endToPpq( ppq, enddiff )
   if ( enddiff > 250 ) then
     enddiff = 255
   end
-  return ppq + singlerow * ( enddiff / 255.0 )
+  return ppq + singlerow * ( (enddiff + 1) / 256.0)
 end
 
 ----------------------
@@ -5194,6 +5199,7 @@ function tracker:createNote(inChar, shift)
   end
   
   local noteToEdit = noteStart[rows*chan+row]
+  local previousNote = noteGrid[rows*chan+row]
 
   local function changeOctave(octave)
     if ( octave ) then
@@ -5275,17 +5281,41 @@ function tracker:createNote(inChar, shift)
       shouldMove = true
     end
   elseif ( ( ftype == 'end1' ) and validHex( char ) ) then
-    if ( noteToEdit ) then
+    if ( self.cfg.noteEndsAtEnd == 0 and noteToEdit ) then
       local oldEnd = self:getNoteEnd( noteToEdit )
+      if oldEnd == 255 then oldEnd = 240 end
       local newEnd = self:editCCField( oldEnd, 1, char )
       self:setNoteEnd( noteToEdit, newEnd )
       shouldMove = true
+    elseif ( self.cfg.noteEndsAtEnd == 1 and previousNote and previousNote >= 0 ) then
+      local oldEnd = self:getNoteEnd( previousNote )
+      if oldEnd == 255 then oldEnd = 240 end
+      local newEnd = self:editCCField( oldEnd, 1, char )
+      local startRow = self.ypos
+      while (noteStart[rows*chan+startRow - 1] == nil and startRow > 1) do
+        startRow = startRow - 1
+      end
+      local newRows = self.ypos - startRow + 1
+      self:setNoteEnd( previousNote, newEnd, newRows )
+      shouldMove = true
     end
   elseif ( ( ftype == 'end2' ) and validHex( char ) ) then
-    if ( noteToEdit ) then
+    if ( self.cfg.noteEndsAtEnd == 0 and noteToEdit ) then
       local oldEnd = self:getNoteEnd( noteToEdit )
+      if oldEnd == 255 then oldEnd = 0 end
       local newEnd = self:editCCField( oldEnd, 2, char )
       self:setNoteEnd( noteToEdit, newEnd )
+      shouldMove = true
+    elseif ( self.cfg.noteEndsAtEnd == 1 and previousNote and previousNote >= 0 ) then
+      local oldEnd = self:getNoteEnd( previousNote )
+      if oldEnd == 255 then oldEnd = 0 end
+      local newEnd = self:editCCField( oldEnd, 2, char )
+      local startRow = self.ypos
+      while (noteStart[rows*chan+startRow - 1] == nil and startRow > 1) do
+        startRow = startRow - 1
+      end
+      local newRows = self.ypos - startRow + 1
+      self:setNoteEnd( previousNote, newEnd, newRows )
       shouldMove = true
     end
   elseif ( ( ftype == 'mod1' ) and validHex( char ) ) then
@@ -5782,7 +5812,7 @@ function tracker:delete()
   local ftype, chan, row = self:getLocation()
 
   -- What are we manipulating here?
-  if ( ( ftype == 'text' ) or ( ftype == 'octave' ) or ( ftype == 'vel1' ) or ( ftype == 'vel2' ) or ( ftype == 'delay1' ) or ( ftype == 'delay2' ) or ( ftype == 'end1' ) or ( ftype == 'end2' ) ) then
+  if ( ( ftype == 'text' ) or ( ftype == 'octave' ) or ( ftype == 'vel1' ) or ( ftype == 'vel2' ) ) then
     local noteGrid = data.note
     local noteStart = data.noteStart
 
@@ -5803,6 +5833,37 @@ function tracker:delete()
       reaper.MarkProjectDirty(0)
       self:checkNoteGrow(notes, noteGrid, rows, chan, row, singlerow, noteToDelete)
       self:deleteNote(chan, row)
+    end
+  elseif ( ftype == 'delay1' ) or ( ftype == 'delay2' ) then
+    local selected = data.noteStart[rows*chan+row]
+    if selected and selected >= 0 then
+      local delay = self:getNoteDelay( selected )
+      self:setNoteDelay( selected, 0 )
+    end
+  elseif ( ftype == 'end1' ) or ( ftype == 'end2' ) then
+    local noteGrid = data.note
+    if (self.cfg.noteEndsAtEnd == 1) then
+      local selected = noteGrid[rows*chan+row]
+      if self.ypos == rows or (noteGrid[rows*chan+row+1] and noteGrid[rows*chan+row+1] >= 0 ) then
+        if selected and selected >= 0 then
+          local newend = self:getNoteEnd( selected )
+          self:setNoteEnd( selected, 255 )
+        end
+      else
+        local selected = noteGrid[rows*chan+row+1]
+        if selected and selected < 0 then
+          tracker:checkNoteGrow(notes, noteGrid, rows, chan, row+1, singlerow, nil, nil, 1)
+          if ( noteGrid[rows*chan+row+1] < -1 ) then
+            self:deleteNote(chan, row+1)
+          end
+        end
+      end
+    else
+      local selected = data.noteStart[rows*chan+row]
+      if selected and selected >= 0 then
+        local newend = self:getNoteEnd( selected )
+        self:setNoteEnd( selected, 255 )
+      end
     end
   elseif ( ftype == 'legato' ) then
     self:deleteLegato(row)
@@ -6349,20 +6410,26 @@ function tracker:assignFromMIDI(channel, idx)
 
     if ( self.showDelays[ channel ] == 1 ) then
       local delay = self:ppqToDelay( startppqpos )
-      data.delay1[rows*channel+ystart]  = self:velToField(delay, 1)
-      data.delay2[rows*channel+ystart]  = self:velToField(delay, 2)
+      data.delay1[rows*channel+ystart]  = self:velToField(delay, 1, 0)
+      data.delay2[rows*channel+ystart]  = self:velToField(delay, 2, 0)
     end
 
     if ( self.showEnd[ channel ] == 1 ) then
       local curEnd = self:ppqToEnd( endppqpos )
-      data.end1[rows*channel+ystart]  = self:velToField(curEnd, 1)
-      data.end2[rows*channel+ystart]  = self:velToField(curEnd, 2)
+      if (self.cfg.noteEndsAtEnd == 1) then
+        data.end1[rows*channel+yend]  = self:velToField(curEnd, 1, 255)
+        data.end2[rows*channel+yend]  = self:velToField(curEnd, 2, 255)
+      else
+        data.end1[rows*channel+ystart]  = self:velToField(curEnd, 1, 255)
+        data.end2[rows*channel+ystart]  = self:velToField(curEnd, 2, 255)
+      end
     end
 
     data.noteStart[rows*channel+ystart] = idx
     for y = ystart,yend,1 do
       data.note[rows*channel+y] = idx
     end
+
     if ( yend+1 < rows ) then
       if ( self:isFree( channel, yend+1, yend+1, 1 ) ) then
         data.text[rows*channel+yend+1] = 'OFF'
@@ -6399,8 +6466,14 @@ end
 
 -- (255/127)
 hexdec = 1 --255/127
-function tracker:velToField( vel, id )
-  return string.sub( string.format('%02X', math.floor(vel) ), id, id )
+function tracker:velToField( vel, id, default )
+  if default == nil then
+    return string.sub( string.format('%02X', math.floor(vel) ), id, id )
+  elseif vel == default then
+    return '.'
+  else
+    return string.sub( string.format('%02X', math.floor(vel) ), id, id )
+  end
 end
 
 function tracker:editVelField( vel, id, val )
