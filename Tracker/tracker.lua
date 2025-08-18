@@ -2129,18 +2129,6 @@ end
 --- Can customize the 'keyboard' here, if they aren't working for you
 local function setKeyboard( choice )
   
-  keys.octaves = {}
-  keys.octaves['0'] = 0
-  keys.octaves['1'] = 1
-  keys.octaves['2'] = 2
-  keys.octaves['3'] = 3
-  keys.octaves['4'] = 4
-  keys.octaves['5'] = 5
-  keys.octaves['6'] = 6
-  keys.octaves['7'] = 7
-  keys.octaves['8'] = 8
-  keys.octaves['9'] = 9
-
   if ( choice == "buzz" or choice == "default" ) then
     local c = 12
     keys.pitches = {}
@@ -2167,22 +2155,18 @@ local function setKeyboard( choice )
     keys.pitches.o = 50-c
     keys.pitches.p = 52-c
     
-    keys.pitches['2'] = 37-c
-    keys.pitches['3'] = 39-c
-    keys.pitches['5'] = 42-c
-    keys.pitches['6'] = 44-c
-    keys.pitches['7'] = 46-c
-    keys.pitches['9'] = 49-c
-    keys.pitches['0'] = 51-c
-    keys.pitches['='] = 54-c
-    
-    keys.pitches[2] = 37-c
-    keys.pitches[3] = 39-c
-    keys.pitches[5] = 42-c
-    keys.pitches[6] = 44-c
-    keys.pitches[7] = 46-c
-    keys.pitches[9] = 49-c
-    keys.pitches[0] = 51-c
+    keys.octaves = {}
+    keys.octaves['0'] = 0
+    keys.octaves['1'] = 1
+    keys.octaves['2'] = 2
+    keys.octaves['3'] = 3
+    keys.octaves['4'] = 4
+    keys.octaves['5'] = 5
+    keys.octaves['6'] = 6
+    keys.octaves['7'] = 7
+    keys.octaves['8'] = 8
+    keys.octaves['9'] = 9
+
   elseif ( choice == "renoise" ) then
     keys.pitches = {}
     local c = 12
@@ -5199,6 +5183,19 @@ function tracker:createNote(inChar, shift)
   end
   
   local noteToEdit = noteStart[rows*chan+row]
+
+  local function changeOctave(octave)
+    if ( octave ) then
+      if ( noteToEdit ) then
+        local pitch, vel, startppqpos, endppqpos = table.unpack( notes[noteToEdit] )
+        pitch = pitch - math.floor(pitch/12)*12 + (octave+1) * 12
+        reaper.MIDI_SetNote(self.take, noteToEdit, nil, nil, nil, nil, nil, pitch, nil, true)
+        self:playNote(chan, pitch, vel)
+      end
+      shouldMove = true
+    end
+  end
+  
   local previousNote = noteGrid[rows*chan+row]
 
    -- What are we manipulating here?
@@ -5217,18 +5214,13 @@ function tracker:createNote(inChar, shift)
       end
       
       shouldMove = self:placeNote(pitch, chan, row)
+    else
+      if (tracker.cfg.buzzNoteCols == 0) then
+        changeOctave(keys.octaves[char])
+      end
     end
   elseif ( ftype == 'octave' ) then
-    local octave = keys.octaves[char]
-    if ( octave ) then
-      if ( noteToEdit ) then
-        local pitch, vel, startppqpos, endppqpos = table.unpack( notes[noteToEdit] )
-        pitch = pitch - math.floor(pitch/12)*12 + (octave+1) * 12
-        reaper.MIDI_SetNote(self.take, noteToEdit, nil, nil, nil, nil, nil, pitch, nil, true)
-        self:playNote(chan, pitch, vel)
-      end
-      shouldMove = true
-    end
+    changeOctave(tonumber(char))
   elseif ( ( ftype == 'vel1' ) and validHex( char ) ) then
     if ( noteToEdit ) then
       local pitch, vel, startppqpos, endppqpos = table.unpack( notes[noteToEdit] )
