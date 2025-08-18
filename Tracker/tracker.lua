@@ -4699,7 +4699,7 @@ function tracker:advanceCursor()
   else
     self.ypos = self.ypos + self.advance
     if self.ypos > self.rows then
-      if self.cfg.wrapAtBottom then 
+      if ( self.cfg.wrapAtBottom == 1 ) then 
         self.ypos = self.ypos - self.rows
       else
         self.ypos = self.rows
