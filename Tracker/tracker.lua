@@ -8708,32 +8708,35 @@ function tracker:dragBlock(cx, cy)
     xp = cx
     yp = cy
   end
-
-  if (xp ~= cp.lastShiftCoord.x) or (yp ~= cp.lastShiftCoord.y) or (cp.xstart ~= -1) then
-    local xstart, xend, ystart, yend
-    if ( xp > cp.lastShiftCoord.x ) then
-      xstart  = cp.lastShiftCoord.x
-      xend    = xp
-    else
-      xstart  = xp
-      xend    = cp.lastShiftCoord.x
-    end
-    if ( yp > cp.lastShiftCoord.y ) then
-      ystart  = cp.lastShiftCoord.y
-      yend    = yp
-    else
-      ystart  = yp
-      yend    = cp.lastShiftCoord.y
-    end
-
-    cp.xstart  = xstart
-    cp.xstop   = xend
-    cp.all     = 0
-    cp.ystart  = ystart
-    cp.ystop   = yend
-    cp.changed = 1
-    cp.swapped = 0
+  if ( not cp.lastShiftCoord ) then
+    cp.lastShiftCoord = {}
+    cp.lastShiftCoord.x = xp
+    cp.lastShiftCoord.y = yp
   end
+
+  local xstart, xend, ystart, yend
+  if ( xp > cp.lastShiftCoord.x ) then
+    xstart  = cp.lastShiftCoord.x
+    xend    = xp
+  else
+    xstart  = xp
+    xend    = cp.lastShiftCoord.x
+  end
+  if ( yp > cp.lastShiftCoord.y ) then
+    ystart  = cp.lastShiftCoord.y
+    yend    = yp
+  else
+    ystart  = yp
+    yend    = cp.lastShiftCoord.y
+  end
+
+  cp.xstart  = xstart
+  cp.xstop   = xend
+  cp.all     = 0
+  cp.ystart  = ystart
+  cp.ystop   = yend
+  cp.changed = 1
+  cp.swapped = 0
 end
 
 function tracker:beginBlock()
