@@ -694,8 +694,8 @@ global(N_SAMPLES, select_by_notes)
 );
 
 function processBacklog()
-instance(note_schedule, note_schedule_ptr, next_backlog)
-local(chan, vol, sample_idx)
+instance(note_schedule, note_schedule_ptr, next_backlog, vol)
+local(sample_idx)
 global()
 (
   // Count down to the next item
