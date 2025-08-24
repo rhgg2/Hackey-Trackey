@@ -936,7 +936,7 @@ multi_out ? (
   spl1 += ssr;
 );
 
-@gfx
+@gfx 640 480
 over_pad = -1;
 SAMPLE_FONT = 5;
 TINY_FONT = 6;
