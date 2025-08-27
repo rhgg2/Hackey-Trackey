@@ -186,45 +186,25 @@ local()
   this.set_pan(0.5);
 );
 
+<? function all_channels(txt) 
+local(i) (
+  i = 1;
+  loop(16,
+    printf(txt, i, i, i, i, i, i);
+    printf("\n");
+    i = i+1;
+  );
+)?>
+
 !initialized ? (
- chan1.chan_default(1);
- chan2.chan_default(2);
- chan3.chan_default(3);
- chan4.chan_default(4);
- chan5.chan_default(5);
- chan6.chan_default(6);
- chan7.chan_default(7);
- chan8.chan_default(8);
- chan9.chan_default(9);
- chan10.chan_default(10);
- chan11.chan_default(11);
- chan12.chan_default(12);
- chan13.chan_default(13);
- chan14.chan_default(14);
- chan15.chan_default(15);
- chan16.chan_default(16);
+ <? all_channels("chan%d.chan_default(%d);") ?>
  preview_channel.chan_default(17);
  initialized = 1;
  last_selected_sample = -1337;
 );
 
+<? all_channels("chan%d.stop_sample(%d);") ?>
 preview_channel.stop_sample();
-chan1.stop_sample(1);
-chan2.stop_sample(2);
-chan3.stop_sample(3);
-chan4.stop_sample(4);
-chan5.stop_sample(5);
-chan6.stop_sample(6);
-chan7.stop_sample(7);
-chan8.stop_sample(8);
-chan9.stop_sample(9);
-chan10.stop_sample(10);
-chan11.stop_sample(11);
-chan12.stop_sample(12);
-chan13.stop_sample(13);
-chan14.stop_sample(14);
-chan15.stop_sample(15);
-chan16.stop_sample(16);
 
 function start_playback(buffer_loc, playspeed, offset)
 instance(start_ptr, x_fade_position, playing, fade_start, position, speed,
@@ -769,22 +749,8 @@ freemem = (midimem = freemem) + 32768;
 midi.initializeMIDI(midimem, 1, 1);
 //freemem = (note_schedule = freemem) + 256;
 //note_schedule[] = -1337;
-freemem = chan1.initNoteSchedule(freemem);
-freemem = chan2.initNoteSchedule(freemem);
-freemem = chan3.initNoteSchedule(freemem);
-freemem = chan4.initNoteSchedule(freemem);
-freemem = chan5.initNoteSchedule(freemem);
-freemem = chan6.initNoteSchedule(freemem);
-freemem = chan7.initNoteSchedule(freemem);
-freemem = chan8.initNoteSchedule(freemem);
-freemem = chan9.initNoteSchedule(freemem);
-freemem = chan10.initNoteSchedule(freemem);
-freemem = chan11.initNoteSchedule(freemem);
-freemem = chan12.initNoteSchedule(freemem);
-freemem = chan13.initNoteSchedule(freemem);
-freemem = chan14.initNoteSchedule(freemem);
-freemem = chan15.initNoteSchedule(freemem);
-freemem = chan16.initNoteSchedule(freemem);
+
+<? all_channels("freemem = chan%d.initNoteSchedule(freemem);") ?>
 freemem = preview_channel.initNoteSchedule(freemem);
 freemem = (blocked_samples = freemem) + N_SAMPLES;
 freemem = (muted_samples = freemem) + N_SAMPLES;
@@ -820,44 +786,15 @@ instance(notePtr, remainingNotes, nextNote, curSample)
     handleMessages = 0;
     (nextNote == curSample) ? (
       handleMessages = 1;
-      chan1.prepare_channel_for_messages();
-      chan2.prepare_channel_for_messages();
-      chan3.prepare_channel_for_messages();
-      chan4.prepare_channel_for_messages();
-      chan5.prepare_channel_for_messages();
-      chan6.prepare_channel_for_messages();
-      chan7.prepare_channel_for_messages();
-      chan8.prepare_channel_for_messages();
-      chan9.prepare_channel_for_messages();
-      chan10.prepare_channel_for_messages();
-      chan11.prepare_channel_for_messages();
-      chan12.prepare_channel_for_messages();
-      chan13.prepare_channel_for_messages();
-      chan14.prepare_channel_for_messages();
-      chan15.prepare_channel_for_messages();
-      chan16.prepare_channel_for_messages();
+      <? all_channels("chan%d.prepare_channel_for_messages();") ?>
     );
   
     while(nextNote == curSample) (
       notePtr += 1;
       
       channel = notePtr[];
-      (channel == 1) ? ( chan1.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 2) ? ( chan2.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 3) ? ( chan3.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 4) ? ( chan4.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 5) ? ( chan5.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 6) ? ( chan6.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 7) ? ( chan7.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 8) ? ( chan8.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 9) ? ( chan9.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 10) ? ( chan10.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 11) ? ( chan11.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 12) ? ( chan12.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 13) ? ( chan13.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 14) ? ( chan14.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 15) ? ( chan15.handle_message(notePtr[1], notePtr[2], notePtr[3]); )
-      : (channel == 16) ? ( chan16.handle_message(notePtr[1], notePtr[2], notePtr[3]); );
+      (channel == 0) ? ( 0 ) 
+      <? all_channels(": (channel == %d) ? ( chan%d.handle_message(notePtr[1], notePtr[2], notePtr[3]); )") ?>;
       notePtr += 4;
       
       // Avoid constantly dereferencing by picking up the next one
@@ -866,22 +803,7 @@ instance(notePtr, remainingNotes, nextNote, curSample)
     );
     
     handleMessages ? (
-      chan1.commit_note();
-      chan2.commit_note();
-      chan3.commit_note();
-      chan4.commit_note();
-      chan5.commit_note();
-      chan6.commit_note();
-      chan7.commit_note();
-      chan8.commit_note();
-      chan9.commit_note();
-      chan10.commit_note();
-      chan11.commit_note();
-      chan12.commit_note();
-      chan13.commit_note();
-      chan14.commit_note();
-      chan15.commit_note();
-      chan16.commit_note();
+      <? all_channels("chan%d.commit_note();") ?>
     );
   );
   
@@ -915,28 +837,13 @@ multi_out ? (
   spl0 += ssl;
   spl1 += ssr;
 ) : (
-  chan1.playing ? chan1.play_channel();
-  chan2.playing ? chan2.play_channel();
-  chan3.playing ? chan3.play_channel();
-  chan4.playing ? chan4.play_channel();
-  chan5.playing ? chan5.play_channel();
-  chan6.playing ? chan6.play_channel();
-  chan7.playing ? chan7.play_channel();
-  chan8.playing ? chan8.play_channel();
-  chan9.playing ? chan9.play_channel();
-  chan10.playing ? chan10.play_channel();
-  chan11.playing ? chan11.play_channel();
-  chan12.playing ? chan12.play_channel();
-  chan13.playing ? chan13.play_channel();
-  chan14.playing ? chan14.play_channel();
-  chan15.playing ? chan15.play_channel();
-  chan16.playing ? chan16.play_channel();
+  <? all_channels("chan%d.playing ? chan%d.play_channel();") ?>
   preview_channel.play_channel();
   spl0 += ssl;
   spl1 += ssr;
 );
 
-@gfx 640 480
+@gfx
 over_pad = -1;
 SAMPLE_FONT = 5;
 TINY_FONT = 6;
@@ -1014,23 +921,7 @@ loop(ny,
 
 updated_loop ? (
   updated_loop = 0;
-  chan1.channel_update_loop();
-  chan2.channel_update_loop();
-  chan3.channel_update_loop();
-  chan4.channel_update_loop();
-  chan5.channel_update_loop();
-  chan6.channel_update_loop();
-  chan7.channel_update_loop();
-  chan8.channel_update_loop();
-  chan9.channel_update_loop();
-  chan10.channel_update_loop();
-  chan11.channel_update_loop();
-  chan12.channel_update_loop();
-  chan13.channel_update_loop();
-  chan14.channel_update_loop();
-  chan15.channel_update_loop();
-  chan16.channel_update_loop();
-  
+  <? all_channels("channel_update_loop();") ?>
   preview_channel.channel_update_loop();
 );
 
@@ -1081,22 +972,7 @@ instance(sample_idx, current_playback, play0, play1)
   );
 );
 
-chan1.draw_markers();
-chan2.draw_markers();
-chan3.draw_markers();
-chan4.draw_markers();
-chan5.draw_markers();
-chan6.draw_markers();
-chan7.draw_markers();
-chan8.draw_markers();
-chan9.draw_markers();
-chan10.draw_markers();
-chan11.draw_markers();
-chan12.draw_markers();
-chan13.draw_markers();
-chan14.draw_markers();
-chan15.draw_markers();
-chan16.draw_markers();
+<? all_channels("chan%d.draw_markers();") ?>
 preview_channel.draw_markers();
 
 sample_data_gfx_finalize();
