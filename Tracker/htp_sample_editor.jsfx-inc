@@ -99,8 +99,6 @@ function init_sample_data_defaults()
 (
   SAMPLE_NAMES = 32;
   ref_note == 0 ? ref_note = 69;
-  crossfade_samples = 128*2;
-  pi_inv_crossfade_samples = $pi / crossfade_samples;
   SAMPLE_HEADER = 64;
   SAMPLE_SIZE = 32768 * 16;
   MAX_SAMPLE_DURATION = SAMPLE_SIZE - SAMPLE_HEADER;

@@ -101,6 +101,8 @@ slider2:kb_layout=0<0,2,1{QWERTY,QWERTZ,AZERTY}>-Keyboard layout
 slider3:multi_out=0<0,1,{Off,On}>-Multi-Out
 slider4:select_by_notes=0<0,1,{Off,On}>-Choose sample by note
 slider5:interpolation=1<0,3,1{Draft,Low,Medium,High}>Resampling quality
+slider6:fade_in_slider=8<0,9,1{1,2,4,8,16,32,64,128,256,512}>Fade in time (samples)
+slider7:fade_out_slider=8<0,9,1{1,2,4,8,16,32,64,128,256,512}>Fade out time (samples)
 
 @init
 init_sample_data_defaults();
@@ -160,11 +162,63 @@ instance(lpan, rpan)
   rpan = sin(p);
 );
 
-function stop_playback()
-instance(x_fade_position)
-global(crossfade_samples)
+SEARCH_RADIUS = srate/200; // 5 ms
+
+function find_best_crossing(start_ptr, offset, len, dir, speed)
+local(score_both, score_one, score_energy,
+      pos_both, pos_one, pos_energy,
+      L, R, prevL, prevR, sgnL, sgnR,
+      this_score, i, pos)
+global(SEARCH_RADIUS)
 (
-  x_fade_position = - crossfade_samples;
+  offset == 0 ? 0 : (
+    pos_energy = pos = offset;
+    score_both = score_one = score_energy = 1000000;
+    
+    prevL = start_ptr[2*pos];
+    prevR = start_ptr[2*pos+1];
+    i = 0;
+    
+    loop(min(abs(SEARCH_RADIUS*speed), dir > 0 ? len-offset-1 : offset-1),
+      pos += dir;
+      i += 1;
+      
+      L = start_ptr[2*pos];
+      R = start_ptr[2*pos+1];
+      sgnL = prevL * L;
+      sgnR = prevR * R;
+      prevL = L;
+      prevR = R;
+
+      this_score = max(abs(L), abs(R)) * (1 + i*0.01);
+
+      sgnL <= 0 && sgnR <= 0 && this_score < score_both ? (
+        score_both = this_score;
+        pos_both   = pos;
+      )
+      : (sgnL <= 0 || sgnR <= 0) && this_score < score_one ? (
+        score_one  = this_score;
+        pos_one   = pos;
+      )
+      : this_score < score_energy ? (
+        score_energy  = this_score;
+        pos_energy    = pos;
+      );
+    );
+
+  score_both < 1000000 ? pos_both :
+  score_one  < 1000000 ? pos_one  :
+                         pos_energy;
+  );
+);
+
+function stop_playback()
+instance(x_fade_position, position, stop_position, start_ptr, speed)
+local(end_crossing)
+global(fade_out_samples)
+(
+  end_crossing = find_best_crossing(start_ptr, position + ceil(fade_out_samples * speed), stop_position, sign(speed), speed);
+  x_fade_position = -ceil((end_crossing - position)/speed);
 );
 
 function stop_sample()
@@ -283,20 +337,22 @@ local(pitch_ratio)
 function start_playback(buffer_loc, playspeed, offset)
 instance(start_ptr, x_fade_position, playing, fade_start, position, speed,
          loop_start, loop_stop, loop_type, stop_position)
-global(crossfade_samples, SAMPLE_HEADER)
-local(len)
+global(fade_in_samples, fade_out_samples, SAMPLE_HEADER)
+local(len, end_crossing)
 (
   len = buffer_loc[];
   stop_position = len / 2 - 2;
-  fade_start = buffer_loc + buffer_loc[] + SAMPLE_HEADER - 2 * playspeed * crossfade_samples;
   start_ptr = buffer_loc + SAMPLE_HEADER;
+  end_crossing = playspeed < 0 ? find_best_crossing(start_ptr, 0, stop_position, 1, -playspeed)
+                               :  find_best_crossing(start_ptr, stop_position, stop_position, -1, playspeed);
+  fade_start = max(start_ptr, start_ptr + 2 * end_crossing - 2 * playspeed * fade_out_samples);
   
   loop_start = buffer_loc[3];
   loop_stop = buffer_loc[4];
   loop_type = buffer_loc[5];
   
-  x_fade_position = crossfade_samples;
-  position = offset;
+  x_fade_position = fade_in_samples;
+  position = find_best_crossing(start_ptr, offset, stop_position, 1, playspeed);
   playing = 1;
   this.set_speed(playspeed);
 );
@@ -385,11 +441,13 @@ local(frac, ism1, is0, is1, is2, id0, id1, id2, id3, fade_fraction)
 (
   // Positive fade means fading in
   (x_fade_position > 0.01) ? (
-    fade_level = 1.0 - sqrt(0.5 - 0.5 * cos(x_fade_position * pi_inv_crossfade_samples));
+    fade_fraction = 1 - (x_fade_position-1)/fade_in_samples; 
+    fade_level = 10*fade_fraction^3 - 15*fade_fraction^4 + 6*fade_fraction^5;
     x_fade_position -= 1;
   // Negative fade means fading out
   ) : (x_fade_position < -0.01) ? (
-    fade_level = sqrt(0.5 - 0.5 * cos(- x_fade_position * pi_inv_crossfade_samples));
+    fade_fraction = max(0,1 + (x_fade_position+1)/fade_out_samples); 
+    fade_level = 1 - 10*fade_fraction^3 + 15*fade_fraction^4 - 6*fade_fraction^5;
     x_fade_position += 1;
     ((x_fade_position == 0) || (position > stop_position)) ? (
       playing = (interpolation > 1 ? -26 : 0); // Terminate playback after this number of samples
@@ -412,7 +470,7 @@ local(frac, ism1, is0, is1, is2, id0, id1, id2, id3, fade_fraction)
       );
     ) : (
       (read_ptr > fade_start) ? (
-        x_fade_position = - crossfade_samples;
+        x_fade_position = - fade_out_samples;
       );
     );
   );
@@ -1052,6 +1110,8 @@ freemem = (autosplits = freemem) + 128;
 freemem = build_all_sinc_tables(freemem);
 
 @slider
+fade_in_samples = 2^(fade_in_slider);
+fade_out_samples = 2^(fade_out_slider);
 interpolation > 2 ? (pdc_delay = 24; pdc_bot_ch = 0; pdc_top_ch = 17;);
 freemem = build_all_sinc_tables(sinc_tables);
 
