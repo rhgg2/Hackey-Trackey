@@ -123,6 +123,8 @@ selection_color_g = 0.1;
 selection_color_b = 0.5;
 selection_color_a = 0.2;
 
+dc_coeff = exp(-2*$pi*10/srate); // 10Hz cutoff
+
 (ticks_per_beat == 0) ? ticks_per_beat = 4;
 
 function char_to_pitch(ch)
@@ -842,8 +844,9 @@ global()
 );
 
 function play_channel()
-instance(vol, cleft, cright, lpan, rpan, next_backlog)
-global(ssl, ssr)
+instance(vol, cleft, cright, lpan, rpan, next_backlog, xL, yL, xR, yR)
+global(ssl, ssr, dc_coeff)
+local(temp)
 (
   next_backlog > 0 ? ( this.processBacklog() );
 
@@ -860,6 +863,18 @@ global(ssl, ssr)
     ssl += this.play1.outL * cleft;
     ssr += this.play1.outR * cright;
   );
+  
+  // DC filter at 10Hz
+  
+  temp = ssl;
+  ssl -= xL - dc_coeff * yL;
+  yL = ssl;
+  xL = temp;
+  
+  temp = ssr;
+  ssr -= xR - dc_coeff * yR;
+  yR = ssr;
+  xR = temp;
 );
 
 function initNoteSchedule(mem)
