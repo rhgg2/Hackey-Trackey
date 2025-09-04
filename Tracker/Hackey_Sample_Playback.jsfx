@@ -100,7 +100,7 @@ slider1:tracker=0<0,1,1{Buzz,Renoise}>-Key mapping
 slider2:kb_layout=0<0,2,1{QWERTY,QWERTZ,AZERTY}>-Keyboard layout
 slider3:multi_out=0<0,1,{Off,On}>-Multi-Out
 slider4:select_by_notes=0<0,1,{Off,On}>-Choose sample by note
-
+slider5:interpolation=1<0,3,1{Draft,Low,Medium,High}>Resampling quality
 
 @init
 init_sample_data_defaults();
@@ -206,6 +206,78 @@ local(i) (
 <? all_channels("chan%d.stop_sample(%d);") ?>
 preview_channel.stop_sample();
 
+/* Choose interpolation kernel for sample player */
+
+function set_speed(new_speed)
+instance(speed, sinc_table, table_len, at_base_rate)
+global(sinc_tables)
+local(pitch_ratio)
+(
+  pitch_ratio = abs(new_speed);
+  at_base_rate = 0;
+
+  pitch_ratio != abs(speed) ? (
+    pitch_ratio < 0.125 ? (
+      sinc_table = sinc_tables[0]+1;
+      table_len = sinc_tables[0][0];
+    ) :
+    pitch_ratio <= 0.5 ? (
+      sinc_table = sinc_tables[1]+1;
+      table_len = sinc_tables[1][0];
+    ) :
+    pitch_ratio <= 1 ? (
+      sinc_table = sinc_tables[2]+1;
+      table_len = sinc_tables[2][0];
+      pitch_ratio == 1 ? at_base_rate = 1;
+    ) :
+    pitch_ratio <= 1.414214 ? (
+      sinc_table = sinc_tables[3]+1;
+      table_len = sinc_tables[3][0];
+    ) :
+    pitch_ratio <= 2.0 ? (
+      sinc_table = sinc_tables[4]+1;
+      table_len = sinc_tables[4][0];
+    ) :
+    pitch_ratio <= 2.828427 ? (
+      sinc_table = sinc_tables[5]+1;
+      table_len = sinc_tables[5][0];
+    ) :
+    pitch_ratio <= 4.0 ? (
+      sinc_table = sinc_tables[6]+1;
+      table_len = sinc_tables[6][0];
+    ) :
+    pitch_ratio <= 5.656854 ? (
+      sinc_table = sinc_tables[7]+1;
+      table_len = sinc_tables[7][0];
+    ) :
+    pitch_ratio <= 8.0 ? (
+      sinc_table = sinc_tables[8]+1;
+      table_len = sinc_tables[8][0];
+    ) :
+    pitch_ratio <= 11.313708 ? (
+      sinc_table = sinc_tables[9]+1;
+      table_len = sinc_tables[9][0];
+    ) :
+    pitch_ratio <= 16.0 ? (
+      sinc_table = sinc_tables[10]+1;
+      table_len = sinc_tables[10][0];
+    ) :
+    pitch_ratio <= 22.627417 ? (
+      sinc_table = sinc_tables[11]+1;
+      table_len = sinc_tables[11][0];
+    ) :
+    pitch_ratio <= 32 ? (
+      sinc_table = sinc_tables[12]+1;
+      table_len = sinc_tables[12][0];
+    ) : (
+      sinc_table = sinc_tables[13]+1;
+      table_len = sinc_tables[13][0];
+    );
+  );
+  
+  speed = new_speed;
+);
+
 function start_playback(buffer_loc, playspeed, offset)
 instance(start_ptr, x_fade_position, playing, fade_start, position, speed,
          loop_start, loop_stop, loop_type, stop_position)
@@ -224,7 +296,7 @@ local(len)
   x_fade_position = crossfade_samples;
   position = offset;
   playing = 1;
-  speed = playspeed;
+  this.set_speed(playspeed);
 );
 
 function update_loop_parameters(buffer_loc)
@@ -243,15 +315,71 @@ instance(loop_start, loop_stop, loop_type)
   );
 );
 
+/* downsampling FIR filter */
+function downsample_fir(x0,x1)
+instance ( <? i=0; loop(13, printf("ex%d, ", i); i+=1;) ?> // even taps
+           <? i=0; loop(24, printf("ox%d, ", i); i+=1;) ?> ) // odd taps
+(
+  <? i=12; loop(12, printf("ex%d = ex%d; ", i, i-1); i-=1;) ?>
+  <? i=23; loop(23, printf("ox%d = ox%d; ", i, i-1); i-=1;) ?>
+  ex0 = x0; ox0 = x1;
+   -0.00410257623761148*(ox0+ox23) +
+    0.00395055104797943*(ox1+ox22) +
+   -0.00580787578939173*(ox2+ox21) +
+    0.00823497890520802*(ox3+ox20) +
+   -0.0113722265131996*(ox4+ox19) +
+    0.01547155714097370*(ox5+ox18) +
+   -0.0209449963986892*(ox6+ox17) +
+    0.0285680781320342*(ox7+ox16) +
+   -0.0400151439056141*(ox8+ox15) +
+    0.0596695194318312*(ox9+ox14) +
+   -0.103669138691865*(ox10+ox13) +
+    0.317491986549921*(ox11+ox12) +
+    0.5*ex12;
+);
+
+function reset_fir()
+instance ( <? i=0; loop(13, printf("ex%d, ", i); i+=1;) ?> // even taps
+           <? i=0; loop(24, printf("ox%d, ", i); i+=1;) ?> ) // odd taps
+(
+  <? i=0; loop(13, printf("ex%d=0; ", i); i+=1;) ?> // even taps
+  <? i=0; loop(24, printf("ox%d=0; ", i); i+=1;) ?> // odd taps
+);
+
+/* Sinc interpolated resampling */
+
+function sinc_interp(start_ptr, position, channel)
+instance(sinc_table, table_len, at_base_rate)
+local(phase, idx, frac, val0, val1, sample_ptr, table_ptr)
+global(KERNEL_PHASES)
+(
+  idx = floor(position);
+  frac = position - idx;
+  phase = floor(frac * KERNEL_PHASES);
+
+  frac == 0 && at_base_rate ?
+    start_ptr[2*idx + channel]
+  : idx >= table_len*0.5 ? (
+    sample_ptr = start_ptr + 2*idx - table_len + channel;
+    table_ptr = sinc_table + 2*phase*table_len;
+    mem_multiply_sum(sample_ptr, table_ptr, 2 * table_len);
+  ) : (
+    sample_ptr = start_ptr + channel;
+    table_ptr = sinc_table + 2*phase*table_len + table_len - 2 * idx;
+    mem_multiply_sum(sample_ptr, table_ptr, table_len + 2 * idx);
+  );
+);
+
 /* Sample play (each channel has two of these guys that alternate) */
 function play()
 instance(start_ptr, read_ptr, x_fade_position, fade_start,
          outL, outR, playing, fade_level, position, speed,
          loop_start, loop_stop, loop_type,
          portamento_len, portamento_ds, vib_len,
-         vib_depth, vib_speed, vib_phase, stop_position)
-global(crossfade_samples, pi_inv_crossfade_samples, eco, play_state)
-local(frac, ism1, is0, is1, is2, id0, id1, id2, id3)
+         vib_depth, vib_speed, vib_phase, stop_position,
+         sinc_table, table_len)
+global(fade_in_samples, fade_out_samples, interpolation, play_state)
+local(frac, ism1, is0, is1, is2, id0, id1, id2, id3, fade_fraction)
 (
   // Positive fade means fading in
   (x_fade_position > 0.01) ? (
@@ -262,11 +390,12 @@ local(frac, ism1, is0, is1, is2, id0, id1, id2, id3)
     fade_level = sqrt(0.5 - 0.5 * cos(- x_fade_position * pi_inv_crossfade_samples));
     x_fade_position += 1;
     ((x_fade_position == 0) || (position > stop_position)) ? (
-      playing = 0; // Terminate playback
+      playing = (interpolation > 1 ? -26 : 0); // Terminate playback after this number of samples
       vib_len = 0;
       portamento_len = 0;
+      speed = 0;
     );
-  ) : (
+  ) : (playing > 0) ? (
     // Fade out if we're approaching the end of the recorded sample
     fade_level = 1;
     (loop_start > 0) ? (
@@ -286,15 +415,15 @@ local(frac, ism1, is0, is1, is2, id0, id1, id2, id3)
     );
   );
   
-  frac = position - floor(position);
   
-  position > 1 ? (
-    eco = 1;
-    eco ? (
+  playing > 0 ? (
+    (interpolation == 0) ? (
+      frac = position - floor(position);
       read_ptr = start_ptr + 2 * floor(position) - 2;
-      outL = (read_ptr[] * (1.0 - frac) + frac * read_ptr[2]);
-      outR = (read_ptr[1] * (1.0 - frac) + frac * read_ptr[3]);
-    ) : (
+      outL = fade_level*(read_ptr[] * (1.0 - frac) + frac * read_ptr[2]);
+      outR = fade_level*(read_ptr[1] * (1.0 - frac) + frac * read_ptr[3]);
+    ) : (interpolation == 1) ? (
+      frac = position - floor(position);
       read_ptr = start_ptr + 2 * floor(position) - 8;
       ism1 = read_ptr[];
       is0 = read_ptr[2];
@@ -305,7 +434,7 @@ local(frac, ism1, is0, is1, is2, id0, id1, id2, id3)
       id1 = 0.5*(is1 - ism1);
       id2 = ism1 - 2.5*is0 + 2*is1 - 0.5*is2;
       id3 = 0.5*(is2 - ism1) + 1.5 * (is0 - is1);
-      outL = ((id3*frac+id2)*frac+id1)*frac+id0;
+      outL = fade_level*(((id3*frac+id2)*frac+id1)*frac+id0);
       
       ism1 = read_ptr[1];
       is0 = read_ptr[3];
@@ -316,16 +445,28 @@ local(frac, ism1, is0, is1, is2, id0, id1, id2, id3)
       id1 = 0.5*(is1 - ism1);
       id2 = ism1 - 2.5*is0 + 2*is1 - 0.5*is2;
       id3 = 0.5*(is2 - ism1) + 1.5 * (is0 - is1);
-      outR = ((id3*frac+id2)*frac+id1)*frac+id0;
+      outR = fade_level*(((id3*frac+id2)*frac+id1)*frac+id0);
+    ) : (interpolation == 2) ? (
+      read_ptr = start_ptr + 2 * floor(position);
+      outL = fade_level*this.sinc_interp(start_ptr, position, 0);
+      outR = fade_level*this.sinc_interp(start_ptr, position, 1);
+    ) : (interpolation > 2) ? (
+      read_ptr = start_ptr + 2 * floor(position);
+      speed <= 1 ? (
+        outL = this.left.downsample_fir(2*fade_level*this.sinc_interp(start_ptr, position, 0), 0);
+        outR = this.right.downsample_fir(2*fade_level* this.sinc_interp(start_ptr, position, 1), 0);
+      ) : (
+        outL = this.left.downsample_fir(fade_level*this.sinc_interp(start_ptr, position, 0), 
+                                      fade_level*this.sinc_interp(start_ptr, position+speed/2, 0));
+        outR = this.right.downsample_fir(fade_level*this.sinc_interp(start_ptr, position, 1), 
+                                      fade_level*this.sinc_interp(start_ptr, position+speed/2, 1));
+      );
     );
-  ) : (
-    /* Gentle fade */
-    outL *= 0.9995;
-    outR *= 0.9995;
+  ) : (playing < 0) ? (
+    playing += 1;
+    outL = this.left.downsample_fir(0,0);
+    outR = this.right.downsample_fir(0,0);
   );
-  
-  outL *= fade_level;
-  outR *= fade_level;
   
   (vib_len > 0) ? (
     (vib_len == 1) ? ( vib_phase = -1337; )
@@ -341,7 +482,7 @@ local(frac, ism1, is0, is1, is2, id0, id1, id2, id3)
   
   portamento_len > 0 ? (
     portamento_len -= 1;
-    speed *= portamento_ds;
+    this.set_speed(speed * portamento_ds);
   );
   
   fade_level
@@ -419,7 +560,7 @@ local(vol_change,
   // since this is needed to know where to go.
   got_note ? (
     sample_location = samplelocs[sample_idx];
-    speed = pitch_to_speed(sample_location, pitch);
+    this.set_speed(pitch_to_speed(sample_location, pitch));
   );
 
   /* If no effect value is set, don't use one */
@@ -543,9 +684,9 @@ local(vol_change,
     
     dt = floor(samples_per_beat / 3);
     (current_playback == 1) ? (
-      this.play1.speed = pitch_to_speed(sample_location, pitch);
+      this.play1.set_speed(pitch_to_speed(sample_location, pitch));
     ) : (
-      this.play0.speed = pitch_to_speed(sample_location, pitch);
+      this.play0.set_speed(pitch_to_speed(sample_location, pitch));
     );
     
     note_schedule_ptr = note_schedule;
@@ -620,9 +761,9 @@ local()
     this.commit_note();
   ) : (
     (current_playback == 1) ? (
-      this.play1.speed = pitch_to_speed(samplelocs[sample_idx], -new_pitch);
+      this.play1.set_speed(pitch_to_speed(samplelocs[sample_idx], -new_pitch));
     ) : (
-      this.play0.speed = pitch_to_speed(samplelocs[sample_idx], -new_pitch);
+      this.play0.set_speed(pitch_to_speed(samplelocs[sample_idx], -new_pitch));
     );
   );
 );
@@ -731,6 +872,142 @@ instance(note_schedule)
   mem + 256;
 );
 
+KERNEL_PHASES = 256;
+
+function sinc(x)
+(
+  x == 0 ? 1 : sin($pi * x) / ($pi * x);
+);
+
+function i0_approx(x)
+local(sum, term, k, xh) (
+  sum = 1;
+  term = 1;
+  xh = 0.5 * x;
+  k = 1;
+  while (k<=40 && term > 10^-12) (
+    term *= (xh * xh) / (k * k);
+    sum += term;
+    k += 1;
+  );
+  sum;
+);
+
+
+function build_sinc_table(mem, length, cutoff) 
+local(phase, frac, sum, tap, window, x, denom, alpha)
+global(KERNEL_PHASES)
+(
+  phase = 0;
+  denom = i0_approx(8);
+  
+  mem[0] = length; // store length as first entry
+  mem += 1;
+
+  loop(KERNEL_PHASES,
+    frac = phase / KERNEL_PHASES;
+    sum = 0;
+    tap = 0;
+    alpha = (length - 1)*0.5;
+    loop(length,
+      // Kaiser
+      x = (tap - alpha) / alpha;
+      window = i0_approx(8*sqrt(max(0,1-x*x))) / denom;
+      
+      x = tap - frac - floor(length/2);
+      mem[2*tap] = sinc(x * cutoff) * window;
+      mem[2*tap + 1] = 0.0;
+      // zero-pad so we can use with interleaved stereo
+
+      sum += mem[2*tap];
+      tap += 1;
+    );
+
+    // Normalize
+    tap = 0;
+    loop(length,
+      mem[2*tap] /= sum;
+      tap += 1;
+    );
+
+    phase += 1;
+    mem += 2 * length;
+  );
+
+  mem;
+);
+
+function build_all_sinc_tables(mem)
+local(table, ratio, nextmem, scale)
+global(sinc_tables, srate,interpolation)
+(
+  sinc_tables = mem;
+  nextmem = mem + 14;
+  scale = 40000/srate;
+  
+  interpolation < 3 ? ( 
+    sinc_tables[0]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 64, 1);               // pitch < 0.125
+    sinc_tables[1]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 32, 1);               // pitch 0.125 .. 0.5
+    sinc_tables[2]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 16, 1);               // pitch 0.5 .. 1
+    sinc_tables[3]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 16, scale/sqrt(2));           // pitch 1 .. srqt(2)
+    sinc_tables[4]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 16, scale/2);   // pitch sqrt(2) .. 2
+    sinc_tables[5]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 16, scale/2/sqrt(2));         // pitch 2 .. 2*sqrt(2)
+    sinc_tables[6]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 16, scale/4); // pitch 2*sqrt(2) .. 4
+    sinc_tables[7]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 16, scale/4/sqrt(2));         // pitch 4 .. 4*sqrt(2)
+    sinc_tables[8]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 16, scale/8);  // pitch 4*sqrt(2) .. 8
+    sinc_tables[9]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 16, scale/8/sqrt(2));          // pitch 8 .. 8*sqrt(2)
+    sinc_tables[10] = nextmem;
+    nextmem = build_sinc_table(nextmem, 16, scale/16);  // pitch 8*sqrt(2) .. 16
+    sinc_tables[11] = nextmem;
+    nextmem = build_sinc_table(nextmem, 16, scale/16/sqrt(2));          // pitch 16 .. 16*sqrt(2)
+    sinc_tables[12] = nextmem;
+    nextmem = build_sinc_table(nextmem, 16, scale/32);  // pitch 16*sqrt(2) .. 32
+    sinc_tables[13] = nextmem;
+    nextmem = build_sinc_table(nextmem, 16, scale/32/sqrt(2));         // pitch > 32
+  ) : interpolation == 3 ? (
+    sinc_tables[0]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 128, 1);              // pitch < 0.125
+    sinc_tables[1]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 64, 1);               // pitch 0.125 .. 0.5
+    sinc_tables[2]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 32, 1);               // pitch 0.5 .. 1
+    sinc_tables[3]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 32, scale);           // pitch 1 .. srqt(2)
+    sinc_tables[4]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 32, scale/sqrt(2));   // pitch sqrt(2) .. 2
+    sinc_tables[5]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 32, scale/2);         // pitch 2 .. 2*sqrt(2)
+    sinc_tables[6]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 32, scale/2/sqrt(2)); // pitch 2*sqrt(2) .. 4
+    sinc_tables[7]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 32, scale/4);         // pitch 4 .. 4*sqrt(2)
+    sinc_tables[8]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 32, scale/4/sqrt(2)); // pitch 4*sqrt(2) .. 8
+    sinc_tables[9]  = nextmem;
+    nextmem = build_sinc_table(nextmem, 32, scale/8);         // pitch 8 .. 8*sqrt(2)
+    sinc_tables[10] = nextmem;
+    nextmem = build_sinc_table(nextmem, 32, scale/8/sqrt(2)); // pitch 8*sqrt(2) .. 16
+    sinc_tables[11] = nextmem;
+    nextmem = build_sinc_table(nextmem, 32, scale/16);         // pitch 16 .. 16*sqrt(2)
+    sinc_tables[12] = nextmem;
+    nextmem = build_sinc_table(nextmem, 32, scale/16/sqrt(2)); // pitch 16*sqrt(2) .. 32
+    sinc_tables[13] = nextmem;
+    nextmem = build_sinc_table(nextmem, 32, scale/32);        // pitch > 32
+  );
+  
+  nextmem;
+);
+
 freemem = 0;
 
 // Sample locations are recorded as [64 byte header (first is length), sampledata]
@@ -757,8 +1034,11 @@ freemem = (muted_samples = freemem) + N_SAMPLES;
 freemem = (solod_samples = freemem) + N_SAMPLES;
 
 freemem = (autosplits = freemem) + 128;
+freemem = build_all_sinc_tables(freemem);
 
 @slider
+interpolation > 2 ? (pdc_delay = 24; pdc_bot_ch = 0; pdc_top_ch = 17;);
+freemem = build_all_sinc_tables(sinc_tables);
 
 @serialize
 writing = file_avail(0) < 0;
