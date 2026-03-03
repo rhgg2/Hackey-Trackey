@@ -7134,7 +7134,20 @@ function tracker:addCCPt(row, modtype, value)
     reaper.MIDI_InsertCC(self.take, false, false, ppqStart, 192, ch, math.min(value, 127), 0)
   else
     ch = math.floor(modtype / self.CCjump)
+    local env_shape = self.envShape
+    if (env_shape == 0 or env_shape == 1) then
+      env_shape = 1 - env_shape
+    end
     reaper.MIDI_InsertCC(self.take, false, false, ppqStart, 176, ch, modtype - ch*self.CCjump, math.min(value, 127))
+    if (self.tracker_samples == 0) then
+      local _, _, ccevtcntOut = reaper.MIDI_CountEvts(self.take)
+      for i=ccevtcntOut,0,-1 do
+        local retval, selected, muted, ppqpos, chanmsg, chan, msg2, msg3 = reaper.MIDI_GetCC(self.take, i)
+        if ( ppqpos == ppqStart and chan == ch and msg2 == cc_type ) then
+          reaper.MIDI_SetCCShape(self.take, i, env_shape, 0, true)
+        end
+      end
+    end
   end
 end
 
@@ -7153,7 +7166,21 @@ function tracker:addCCPt_channel(row, modtype, value)
   else
     local ch = math.floor(modtype / self.CCjump)
     local cc_type = modtype - ch*self.CCjump
+    local env_shape = self.envShape
+    if (env_shape == 0 or env_shape == 1) then
+      env_shape = 1 - env_shape
+    end
     reaper.MIDI_InsertCC(self.take, false, false, ppqStart, 176, ch, cc_type, math.min(value, 127))
+    if (self.tracker_samples == 0) then
+      local _, _, ccevtcntOut = reaper.MIDI_CountEvts(self.take)
+      for i=ccevtcntOut,0,-1 do
+        local retval, selected, muted, ppqpos, chanmsg, chan, msg2, msg3 = reaper.MIDI_GetCC(self.take, i)
+        if ( ppqpos == ppqStart and chan == ch and msg2 == cc_type ) then
+          reaper.MIDI_SetCCShape(self.take, i, env_shape, 0, true)
+        end
+      end
+    end
+
     if (self.tracker_samples == 1) and cc_type == self.sampler_effect_type then
       -- There's a CC value that is used to "terminate" effects in sampler mode. This is to prevent effects from
       -- previous patterns being replayed on top of this pattern when midi cc's are chased.
