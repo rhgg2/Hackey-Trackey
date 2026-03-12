@@ -2,6 +2,7 @@
 @description Hackey-Trackey: A tracker interface similar to Jeskola Buzz for MIDI and FX editing.
 @author: Joep Vanlier
 @provides
+  microtuning.lua
   scales.lua
   [main] .
   [main] hackey_trackey_tracker.lua
@@ -765,6 +766,13 @@ tracker.fov.scrolly = 0
 tracker.eps = 1e-3
 tracker.enveps = 1e-4
 
+-- Microtuning mode, defaults to 12-tone (0).
+tracker.currentTuning = 0
+tracker.newTuning = 0
+
+-- Pitchbend range for microtuning
+tracker.pbRange = 2
+
 -- If duplicationBehaviour is set to 1, then MIDI items are duplicated via reaper commands.
 -- This means duplicated copies share the same automation pool for the automation takes.
 -- This means that if you change one pattern based on this pool, the other changes as well.
@@ -1012,6 +1020,7 @@ CaptureModes =
   SELECT_BLOCK = 6,
   SCROLLBAR = 7,
   INS_SELECTOR = 8,
+  TUN_SELECTOR = 9
 }
 
 local function print(...)
@@ -2521,6 +2530,9 @@ local function validHex( char )
   return false
 end
 
+-- Load the microtuning
+dofile(get_script_path() .. 'microtuning.lua')
+microtuning:initialize()
 ------------------------------
 -- Pitch => note
 ------------------------------
@@ -3881,12 +3893,17 @@ function tracker:renderGUI()
     end
     gfx.set(table.unpack(colors.headercolor))
 
+    -- Tuning
+    drawDial(5, tracker.newTuning ~= tracker.currentTuning)
+
+    gfx.set(table.unpack(colors.headercolor))
+
     -- Resolution
-    drawDial(5, tracker.newRowPerQn ~= tracker.rowPerQn)
-    
+    drawDial(6, tracker.newRowPerQn ~= tracker.rowPerQn)
+
     -- Instrument (only in sampler mode)
     if self.tracker_samples == 1 then
-      drawDial(6)
+      drawDial(7)
     end
   end
 
@@ -4433,9 +4450,10 @@ function tracker:infoString()
       str[3] = string.format( "Adv [%d]", self.advance )
     end
     str[4] = string.format( "Oct [%d]", self.transpose )
-    str[5] = string.format( "Res [%d]", tracker.newRowPerQn )
+    str[5] = string.format( "Tun [%d]", tracker.newTuning )
+    str[6] = string.format( "Res [%d]", tracker.newRowPerQn )
     if (self.tracker_samples == 1) then
-      str[6] = string.format( "Ins [%d]", self:lastVel())
+      str[7] = string.format( "Ins [%d]", self:lastVel())
     end
     
     local locs = {}
@@ -4452,7 +4470,7 @@ function tracker:infoString()
     end
     
     local _, yh = gfx.measurestr("X[0]")
-    local capture_modes = {CaptureModes.OUT_SELECTOR, CaptureModes.ENV_SELECTOR, CaptureModes.ADV_SELECTOR, CaptureModes.OCT_SELECTOR, CaptureModes.RES_SELECTOR, CaptureModes.INS_SELECTOR}
+    local capture_modes = {CaptureModes.OUT_SELECTOR, CaptureModes.ENV_SELECTOR, CaptureModes.ADV_SELECTOR, CaptureModes.OCT_SELECTOR, CaptureModes.TUN_SELECTOR, CaptureModes.RES_SELECTOR, CaptureModes.INS_SELECTOR}
     local y = self:getBottom() + yheight
     for i=1,maxi do
       local width = gfx.measurestr(str[i])
@@ -4796,9 +4814,10 @@ function tracker:shiftAt( x, y, shift, scale, onlyNotes )
     local note = notes[selected]
     if ( datafields[x] == 'text' or datafields[x] == 'octave') then
       -- Note
-      local pitch, vel, startppqpos, endppqpos = table.unpack( note )
+      local pitch, vel, startppqpos, endppqpos, detune = table.unpack( note )
 
       local newPitch = 0
+      local newDetune = detune
       if ( self.harmonyActive == 1 ) then
         if ( scale and scale == 1 ) then
           newPitch = scales:shiftRoot(pitch, shift)
@@ -4806,10 +4825,11 @@ function tracker:shiftAt( x, y, shift, scale, onlyNotes )
           newPitch = scales:shiftPitch(pitch, shift)
         end
       else
-        newPitch = pitch+shift
+        local step, octave = microtuning:midiPitchToStep(pitch, detune)
+        newPitch, newDetune = microtuning:stepToMIDIPitch(step + shift, octave)
       end
 
-      reaper.MIDI_SetNote(self.take, selected, nil, nil, nil, nil, nil, newPitch, nil, true)
+      self:retuneNote(selected, chan, newPitch, newDetune)
     elseif ( not onlyNotes ) then
       if ( datafields[x] == 'vel1' ) or ( datafields[x] == 'vel2' ) then
         -- Velocity
@@ -4818,7 +4838,7 @@ function tracker:shiftAt( x, y, shift, scale, onlyNotes )
       elseif ( datafields[x] == 'delay1' ) or ( datafields[x] == 'delay2' ) then
         -- Note delay
         local delay = self:getNoteDelay( selected )
-        self:setNoteDelay( selected, delay + shift )
+        self:setNoteDelay( selected, delay + shift, chan )
       elseif ( datafields[x] == 'end1' ) or ( datafields[x] == 'end2' ) then
         -- Note end
         local newend = self:getNoteEnd( selected )
@@ -4926,8 +4946,9 @@ function tracker:shiftScaleDown()
 end
 
 
-function tracker:addNotePpq(startppqpos, endppqpos, chan, pitch, velocity)
+function tracker:addNotePpq(startppqpos, endppqpos, chan, pitch, velocity, detune)
   local endrow = self:ppqToRow(endppqpos)
+  detune = detune or 0
 
   if ( chan == 1 ) then
     if ( self.legato[endrow] and self.legato[endrow] > -1 ) then
@@ -4936,9 +4957,13 @@ function tracker:addNotePpq(startppqpos, endppqpos, chan, pitch, velocity)
   end
 
   reaper.MIDI_InsertNote( self.take, false, self.muted_channels[chan], startppqpos, endppqpos, chan, pitch, velocity, true )
+  local msg2, msg3 = microtuning:centsToCC(detune)
+  reaper.MIDI_InsertCC(self.take, false, false, startppqpos, 224, chan, msg2, msg3)
 end
 
-function tracker:addNote(startrow, endrow, chan, pitch, velocity)
+function tracker:addNote(startrow, endrow, chan, pitch, velocity, detune)
+  detune = detune or 0
+  
   if ( self.take ) then
     local startppqpos = self:rowToPpq(startrow)
     local endppqpos   = self:rowToPpq(endrow)
@@ -4949,10 +4974,14 @@ function tracker:addNote(startrow, endrow, chan, pitch, velocity)
       end
     end
 
+    local msg2, msg3 = microtuning:centsToCC(detune)
+    
     if self.muted_channels then
       reaper.MIDI_InsertNote( self.take, false, self.muted_channels[chan], startppqpos, endppqpos, chan, pitch, velocity, true )
+      reaper.MIDI_InsertCC(self.take, false, false, startppqpos, 224, chan, msg2, msg3)
     else
       reaper.MIDI_InsertNote( self.take, false, false, startppqpos, endppqpos, chan, pitch, velocity, true )
+      reaper.MIDI_InsertCC(self.take, false, false, startppqpos, 224, chan, msg2, msg3)
     end
   end
 end
@@ -4966,12 +4995,16 @@ function tracker:getNoteDelay( note )
   return self:ppqToDelay( startppqpos )
 end
 
-function tracker:setNoteDelay( note, newDelay )
+function tracker:setNoteDelay( note, newDelay, channel )
   local notes = self.notes
-  local pitch, vel, startppqpos, endppqpos = table.unpack( notes[note] )
+  local pitch, vel, startppqpos, endppqpos, detune = table.unpack( notes[note] )
   local newppq = self:delayToPpq( startppqpos, newDelay )
   if ( newppq < endppqpos ) then
+    self:deletePitchBendForNote(note, channel, newppq+1 )
     reaper.MIDI_SetNote(self.take, note, nil, nil, newppq, nil, nil, nil, nil, true)
+     self:deletePitchBendForNote(note, channel, startppqpos+1 )
+    local msg2, msg3 = microtuning:centsToCC(detune)
+    reaper.MIDI_InsertCC(self.take, false, false, newppq, 224, channel, msg2, msg3)
   end
 end
 
@@ -5083,13 +5116,14 @@ function tracker:showLess()
 end
 
 -- Place a note, potentially overwriting an existing note, or shortening one that is already here.
-function tracker:placeNote(pitch, chan, row)
+function tracker:placeNote(pitch, chan, row, detune)
   local rows       = self.rows
   local data       = self.data  
   local noteGrid   = data.note
   local noteStart  = data.noteStart
   local notes      = self.notes
   local shouldMove = false
+  detune = detune or 0
 
   local noteToInterrupt
   if ( row > 0 ) then
@@ -5106,13 +5140,13 @@ function tracker:placeNote(pitch, chan, row)
       -- update instrument as well as pitch
       reaper.MIDI_SetNote(self.take, noteToEdit, nil, nil, nil, nil, nil, pitch, self:lastVel(), true)
     else
-      reaper.MIDI_SetNote(self.take, noteToEdit, nil, nil, nil, nil, nil, pitch, nil, true)
+      self:retuneNote(noteToEdit, chan, pitch, detune)
     end
     local p2, v2 = table.unpack( notes[noteToEdit] )
     if ( self.tracker_samples == 1) then
-      self:playNote(chan, pitch, self:lastVel())
+      self:playNote(chan, pitch, self:lastVel(), detune)
     else
-      self:playNote(chan, pitch, v2)
+      self:playNote(chan, pitch, v2, detune)
     end
   else
     -- No note yet? See how long the new note can get. Note that we have to ignore any note
@@ -5126,8 +5160,8 @@ function tracker:placeNote(pitch, chan, row)
     end
   
     -- Create the new note!
-    self:addNote(row, k, chan, pitch, self:lastVel())
-    self:playNote(chan, pitch, self:lastVel())
+    self:addNote(row, k, chan, pitch, self:lastVel(), detune)
+    self:playNote(chan, pitch, self:lastVel(), detune)
   
     if ( noteGrid[rows*chan+k] ) then
       if ( noteGrid[rows*chan+k] < -1 ) then
@@ -5207,10 +5241,10 @@ function tracker:createNote(inChar, shift)
   local function changeOctave(octave)
     if ( octave ) then
       if ( noteToEdit ) then
-        local pitch, vel, startppqpos, endppqpos = table.unpack( notes[noteToEdit] )
-        pitch = pitch - math.floor(pitch/12)*12 + (octave+1) * 12
+        local pitch, vel, startppqpos, endppqpos, detune = table.unpack( notes[noteToEdit] )
+        pitch = pitch - math.floor((pitch-9)/12)*12 + octave * 12
         reaper.MIDI_SetNote(self.take, noteToEdit, nil, nil, nil, nil, nil, pitch, nil, true)
-        self:playNote(chan, pitch, vel)
+        self:playNote(chan, pitch, vel, detune)
       end
       shouldMove = true
     end
@@ -5273,14 +5307,14 @@ function tracker:createNote(inChar, shift)
     if ( noteToEdit ) then
       local delay = self:getNoteDelay( noteToEdit )
       local newDelay = self:editCCField( delay, 1, char )
-      self:setNoteDelay( noteToEdit, newDelay )
+      self:setNoteDelay( noteToEdit, newDelay, chan )
       shouldMove = true
     end
   elseif ( ( ftype == 'delay2' ) and validHex( char ) ) then
     if ( noteToEdit ) then
       local delay = self:getNoteDelay( noteToEdit )
       local newDelay = self:editCCField( delay, 2, char )
-      self:setNoteDelay( noteToEdit, newDelay )
+      self:setNoteDelay( noteToEdit, newDelay, chan )
       shouldMove = true
     end
   elseif ( ( ftype == 'end1' ) and validHex( char ) ) then
@@ -5561,7 +5595,20 @@ function tracker:resizeNote(chan, row, sizeChange)
     endppqpos = self:legatoResize(endppqpos, oldLegato, newLegato)
   end
 
-  reaper.MIDI_SetNote(self.take, note, nil, nil, startppqpos, endppqpos + singlerow * sizeChange, nil, nil, nil, true)
+  local newEndPPQPos = endppqpos + singlerow * sizeChange
+  reaper.MIDI_SetNote(self.take, note, nil, nil, startppqpos, newEndPPQPos, nil, nil, nil, true)
+  -- delete irrelevant pitchbend data
+  if (newEndPPQPos < endppqpos) then
+    local _, _, numEvents = reaper.MIDI_CountEvts(self.take)
+    for i = numEvents-1, 0, -1 do
+      local retval, _, _, ppqpos, chanmsg, chan, msg2, msg3 = reaper.MIDI_GetCC(self.take, i)
+      if retval and (chanmsg == 224) and (chan == channel) then
+        if ppqpos >= newEndPPQPos and ppqpos < endppqpos then
+          reaper.MIDI_DeleteCC(self.take, i)
+        end
+      end
+    end
+  end
 end
 
 ---------------------
@@ -5732,6 +5779,7 @@ function tracker:deleteNoteSimple(channel, row)
   offToDelete = noteGrid[rows*channel+row]
   if ( noteToDelete ) then
     if ( noteToDelete > -1 ) then
+      self:deletePitchBendForNote(noteToDelete, channel)
       self:SAFE_DeleteNote(self.take, noteToDelete)
     end
   elseif ( offToDelete ) then
@@ -5784,6 +5832,7 @@ function tracker:deleteNote(channel, row, shiftIn)
           -- We need an explicit OFF symbol. We need to store this separately!
           tracker:addNoteOFF(endppqpos + shift * singlerow, channel)
         end
+        self:deletePitchBendForNote(noteToDelete, channel)
         self:SAFE_DeleteNote(self.take, noteToDelete)
       else
         -- We are deleting a custom OFF symbol
@@ -5796,6 +5845,7 @@ function tracker:deleteNote(channel, row, shiftIn)
     end
   else
     -- No off preservation, just delete it.
+    self:deletePitchBendForNote(noteToDelete, channel)
     self:SAFE_DeleteNote(self.take, noteToDelete)
   end
 end
@@ -5841,7 +5891,7 @@ function tracker:delete()
     local selected = data.noteStart[rows*chan+row]
     if selected and selected >= 0 then
       local delay = self:getNoteDelay( selected )
-      self:setNoteDelay( selected, 0 )
+      self:setNoteDelay( selected, 0, chan )
     end
   elseif ( ftype == 'end1' ) or ( ftype == 'end2' ) then
     local noteGrid = data.note
@@ -5904,8 +5954,7 @@ function tracker:shiftNote(chan, row, shift)
   if ( gridValue > -1 ) then
     -- It is a note
     local notes = self.notes
-    local magicOverlap = self.magicOverlap
-    local pitch, vel, startppqpos, endppqpos = table.unpack( notes[gridValue] )
+    local pitch, vel, startppqpos, endppqpos, detune = table.unpack( notes[gridValue] )
     local wasLegatoTransition = self.legato[self:ppqToRow(endppqpos)]
     local newEnd = endppqpos + shift*singlerow
     local isLegatoTransition = self.legato[self:ppqToRow(newEnd)]
@@ -5922,6 +5971,17 @@ function tracker:shiftNote(chan, row, shift)
     end
 
     if ( row < rows ) then
+      -- Shift associated pitchbend events along with the note
+      local _, _, ccevtcntOut, _ = reaper.MIDI_CountEvts(self.take)
+      for i = ccevtcntOut, 0, -1 do
+        local retval, _, _, ppqpos, chanmsg, cc_chan, msg2, msg3 = reaper.MIDI_GetCC(self.take, i)
+        if retval and chanmsg == 224 and cc_chan == chan then
+          if ppqpos >= startppqpos and ppqpos < endppqpos then
+            reaper.MIDI_SetCC(self.take, i, nil, nil, ppqpos + shift * singlerow, nil, nil, nil, nil, true)
+          end
+        end
+      end
+
       reaper.MIDI_SetNote(self.take, gridValue, nil, nil,startppqpos + shift*singlerow, newEnd, nil, nil, nil, true)
     else
       self:deleteNote(chan, row)
@@ -6179,6 +6239,31 @@ function tracker:getSettings( )
   self:deleteNow()
 end
 
+function tracker:getTuning()
+ -- Determine tuning data for this MIDI item
+  if self.take then
+    local retval, notecntOut, ccevtcntOut, textsyxevtcntOut = reaper.MIDI_CountEvts(self.take)
+    for i=0,textsyxevtcntOut do
+      local _, _, _, ppqpos, typeidx, msg = reaper.MIDI_GetTextSysexEvt(self.take, i, nil, nil, 1, 0, "")
+
+      if ( string.sub(msg,1,3) == 'TUN' ) then
+        local newTuning = microtuning:unserialiseTuning(string.sub(msg,4))
+        if (newTuning ~= self.currentTuning) then
+          self.currentTuning = newTuning
+          self.newTuning = newTuning
+        end
+        return true
+      end
+    end
+  end
+  
+  local newTuning = microtuning:setDefaultTuning()
+  if (newTuning ~= self.currentTuning) then
+    self.currentTuning = newTuning
+    self.newTuning = newTuning
+  end
+end
+
 function tracker:storeSettings( )
   if ( self.rememberSettings == 1 ) then
     if self.take then
@@ -6241,6 +6326,19 @@ function tracker:getOpenCC()
   end
 
   return all
+end
+
+function tracker:storeTuning()
+  local _, _, _, textsyxevtcntOut = reaper.MIDI_CountEvts(self.take)
+  for i=0,textsyxevtcntOut do
+    local _, _, _, ppqpos, typeidx, msg = reaper.MIDI_GetTextSysexEvt(self.take, i, nil, nil, 1, 0, "")
+
+    if ( string.sub(msg,1,3) == 'TUN' ) then
+      reaper.MIDI_DeleteTextSysexEvt(self.take, i)
+    end
+  end
+
+  reaper.MIDI_InsertTextSysexEvt(self.take, false, false, 0, 1, 'TUN' .. microtuning:serialiseTuning() )
 end
 
 function tracker:setResolution( reso )
@@ -6381,7 +6479,8 @@ function tracker:assignFromMIDI(channel, idx)
 
   local notes = self.notes
   local starts = self.noteStarts
-  local pitch, vel, startppqpos, endppqpos = table.unpack( notes[idx] )
+  local pitch, vel, startppqpos, endppqpos, detune = table.unpack( notes[idx] )
+  local step, octave = microtuning:midiPitchToStep(pitch, detune)
   local ystart = math.floor( startppqpos * self.rowPerPpq + self.eps )
 
   -- Is this a legato note? Pretend it is shorter.
@@ -6407,7 +6506,9 @@ function tracker:assignFromMIDI(channel, idx)
   -- Add the note if there is space on this channel, otherwise return false
   local data = self.data
   if ( self:isFree( channel, ystart, yend ) ) then
-    data.text[rows*channel+ystart]      = pitchTable[pitch]
+    
+    --data.text[rows*channel+ystart]      = pitchTable[pitch]
+    data.text[rows*channel+ystart]      = microtuning:stepToText(step, octave)
     data.vel1[rows*channel+ystart]      = self:velToField(vel, 1)
     data.vel2[rows*channel+ystart]      = self:velToField(vel, 2)
 
@@ -6819,26 +6920,42 @@ function tracker:mergeOverlaps()
     -- Grab the notes and store them in channels
     local retval, notecntOut, ccevtcntOut, textsyxevtcntOut = reaper.MIDI_CountEvts(self.take)
 
-    lastpitch = -1
+    local lastpitch = -1
+    local lastdetune = nil
+    local lastend = nil
 
     -- Fetch the notes
     -- We only have potential mergers in channel 1 (the legato channel) and at most one.
     -- Only adjacent notes will be merged.
-    local ch1notes = {}
+    local j = 0
+    local detune = 0
     for i=0,notecntOut do
       local retval, selected, muted, startppqpos, endppqpos, chan, pitch, vel = reaper.MIDI_GetNote(self.take, i)
-      if ( retval == true ) then
-        if ( chan == 1 ) then
-          if ( lastpitch == pitch ) then
-            if ( startppqpos < lastend ) then
-              -- Kill this one
-              reaper.MIDI_SetNote(self.take, i-1, nil, nil, nil, endppqpos, nil, nil, nil, true)
-              tracker:SAFE_DeleteNote( self.take, i )
+      if ( retval == true and chan == 1 ) then
+        -- update detuning info up to current note start position
+          while (j <= ccevtcntOut) do
+            local retvalcc, selectedcc, mutedcc, ppqposcc, chanmsgcc, chancc, msg2cc, msg3cc = reaper.MIDI_GetCC(self.take, j)
+
+            if ( ppqposcc > startppqpos ) then
+              break
             end
+            
+            if ( retvalcc and chanmsgcc == 224 and chancc == 1) then
+              detune = microtuning:ccToCents(msg2cc, msg3cc)
+            end
+            j = j + 1
           end
-          lastpitch = pitch
-          lastend = endppqpos
+
+        if ( lastpitch == pitch and lastdetune == detune) then
+          if ( startppqpos < lastend ) then
+            -- Kill this one
+            reaper.MIDI_SetNote(self.take, i-1, nil, nil, nil, endppqpos, nil, nil, nil, true)
+            tracker:SAFE_DeleteNote( self.take, i )
+          end
         end
+        lastpitch = pitch
+        lastdetune = detune
+        lastend = endppqpos
       end
     end
   end
@@ -7607,6 +7724,71 @@ function tracker:addSamplerCCs(all)
   return all
 end
 
+-- helper functions for microtuning in update function
+
+function tracker:moveNoteWithPitchbend(note, targetChannel)
+  local _, _, _, startppqpos, endppqpos, srcChannel, _, _ = reaper.MIDI_GetNote(self.take, note)
+
+  reaper.MIDI_SetNote(self.take, note, nil, nil, nil, nil, targetChannel, nil, nil, true)
+  local _, _, ccevtcntOut, _ = reaper.MIDI_CountEvts(self.take)
+  for i=0,ccevtcntOut do
+    local _,_, _, ppqpos, chanmsg, chan, msg2, msg3 = reaper.MIDI_GetCC(self.take, i)
+    if ppqpos >= endppqpos then
+      break
+    end
+    if (ppqpos >= startppqpos and chan == srcChannel and chanmsg == 224) then
+      reaper.MIDI_SetCC(self.take, i, nil, nil, nil, nil, targetChannel, nil, nil, true)
+    end
+  end
+end
+
+function tracker:deletePitchBendForNote(noteIdx, channel, endpos)
+  local notes = self.notes
+  local pitch, vel, startppqpos, endppqpos = table.unpack(notes[noteIdx])
+  endpos = endpos or endppqpos
+  
+  local _, _, numEvents = reaper.MIDI_CountEvts(self.take)
+  for i = numEvents-1, 0, -1 do
+    local retval, _, _, ppqpos, chanmsg, chan, msg2, msg3 = reaper.MIDI_GetCC(self.take, i)
+    if retval and (chanmsg == 224) and (chan == channel) then
+      if ppqpos >= startppqpos and ppqpos < endpos then
+        reaper.MIDI_DeleteCC(self.take, i)
+      end
+    end
+  end
+end
+
+function tracker:retuneNote(note, channel, newPitch, newDetune, nextNote)
+  local pitch, vel, startppqpos, endppqpos, detune = table.unpack( self.notes[ note ] )
+  local detuneOffset = newDetune - detune
+  
+  self.notes[note] = {newPitch, vel, startppqpos, endppqpos, newDetune}
+
+  if nextNote then
+    _,_,endppqpos = table.unpack( self.notes[ nextNote ] )
+  end
+
+  if (newPitch ~= pitch) then
+    reaper.MIDI_SetNote(self.take, note, nil, nil, nil, nil, nil, newPitch, nil, true)
+  end
+
+  if (math.abs(detuneOffset) > 0.1) then
+    local _, _, ccevtcntOut, _ = reaper.MIDI_CountEvts(self.take)
+    for i=0,ccevtcntOut do
+      local _,_, _, ppqpos, chanmsg, chan, msg2, msg3 = reaper.MIDI_GetCC(self.take, i)
+      if ppqpos >= endppqpos then
+        break
+      end
+      if (ppqpos >= startppqpos and chan == channel and chanmsg == 224) then
+        local oldDetune = microtuning:ccToCents(msg2, msg3)
+        local targetDetune = oldDetune + detuneOffset
+        local newMsg2, newMsg3 = microtuning:centsToCC(targetDetune)
+        reaper.MIDI_SetCC(self.take, i, nil, nil, nil, nil, nil, newMsg2, newMsg3, true)
+      end
+    end
+  end
+end
+
 --------------------------------------------------------------
 -- Update function
 -- heavy-ish, avoid calling too often (only on MIDI changes)
@@ -7621,6 +7803,7 @@ function tracker:update()
   self:getRowInfo()
   self:getSettings()
   self:getTakeEnvelopes()
+  self:getTuning()
   self:initializeGrid()
   self:updateEnvelopes()
   self:updateNames()
@@ -7754,22 +7937,73 @@ function tracker:update()
       
       channels[0] = {}
       local notes = {}
+      local j = 0
+      local detune = {[0]=0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+      
       for i=0,notecntOut do
         local retval, selected, muted, startppqpos, endppqpos, chan, pitch, vel = reaper.MIDI_GetNote(self.take, i)
         if ( retval == true ) then
+
+          -- update detuning info up to current note start position
+          while (j <= ccevtcntOut) do
+            local retvalcc, selectedcc, mutedcc, ppqposcc, chanmsgcc, chancc, msg2cc, msg3cc = reaper.MIDI_GetCC(self.take, j)
+
+            if ( ppqposcc > startppqpos ) then
+              break
+            end
+            
+            if ( retvalcc and chanmsgcc == 224) then
+              detune[chancc] = microtuning:ccToCents(msg2cc, msg3cc)
+            end
+            j = j + 1
+          end
+            
           if ( not channels[chan] ) then
             channels[chan] = {}
           end
-          notes[i] = {pitch, vel, startppqpos, endppqpos}
-          channels[chan][#(channels[chan])+1] = i
+
           
+          notes[i] = {pitch, vel, startppqpos, endppqpos, detune[chan]}
+          channels[chan][#(channels[chan])+1] = i
+
           if muted then
             muted_channels[chan] = true
           end
         end
       end
+
       self.notes = notes
       self.muted_channels = muted_channels
+
+      -- Retune notes to the selected scale
+
+      local existingPB = {}
+      for i = 0, ccevtcntOut do
+        local retvalcc, _, _, ppqposcc, chanmsgcc, chancc, msg2cc, msg3cc = reaper.MIDI_GetCC(self.take, i)
+        if retvalcc and chanmsgcc == 224 then
+          if not existingPB[chancc] then existingPB[chancc] = {} end
+          existingPB[chancc][ppqposcc] = true
+        end
+      end
+
+      for channel=0,self.channels do
+        if channels[channel] then
+          local channelTable = channels[channel]
+          for i,note in pairs( channelTable ) do
+            local pitch, _, startppqpos, endppqpos, detune = table.unpack(self.notes[note])
+            if not (existingPB[channel] and existingPB[channel][startppqpos]) then
+              local msg2, msg3 = microtuning:centsToCC(detune)
+              reaper.MIDI_InsertCC(self.take, false, false, startppqpos, 224, channel, msg2, msg3)
+            end
+            local newPitch, newDetune = microtuning:normaliseDetune(pitch,detune)
+            self:retuneNote(note, channel, newPitch, newDetune, i < #channelTable and channelTable[i+1])
+            for j=0,notecntOut-1 do
+              local pitch, _, startppqpos, endppqpos, detune = table.unpack(self.notes[j])
+            end
+          end
+        end
+      end
+
 
       -- Assign the tracker assigned channels first
       local failures = {}
@@ -7805,7 +8039,7 @@ function tracker:update()
         local done = false
         while( done == false ) do
           if ( self:assignFromMIDI(targetChannel,note) == true ) then
-            reaper.MIDI_SetNote(self.take, note, nil, nil, nil, nil, targetChannel, nil, nil, true)
+            self:moveNoteWithPitchbend(note, targetChannel)
             done = true
             ok = ok + 1
           else
@@ -7896,6 +8130,7 @@ function tracker:setTake( take )
         self.outChannel = self:getOutChannel()
         self.qnPerBar = self:getQnPerBar()
         self:update()
+        self.newTuning = self.currentTuning
   
         if ( self.cfg.alwaysRecord == 1 ) then
           tracker:arm()
@@ -8344,7 +8579,7 @@ function tracker:pasteClipboard()
       for j = 1,#(channels[i].data) do
         local data = channels[i].data[j]
           if ( data[1] == 'NOTE' ) then
-            -- 'NOTE' (1), pitch (2), velocity (3), startppq (4), endppq (5)
+            -- 'NOTE' (1), pitch (2), velocity (3), startppq (4), endppq (5), detune (6)
             local note = noteGrid[chan*rows+self.ypos-1]
             if ( ( firstNote == 1 ) and ( self.ypos > 0 ) and ( note and ( note > -1 ) ) ) then
               -- If the location where the paste happens started with a note, then shorten it!
@@ -8357,7 +8592,7 @@ function tracker:pasteClipboard()
 
               firstNote = 0
             end
-            self:addNotePpq(data[4] + refppq, data[5] + refppq, chan, data[2], data[3])
+            self:addNotePpq(data[4] + refppq, data[5] + refppq, chan, data[2], data[3], data[6])
             firstNote = 0
           elseif ( data[1] == 'OFF' ) then
             -- 'OFF' symbol
@@ -8486,7 +8721,7 @@ function tracker:copyToClipboard()
         local loc = chan * rows + jy-1
         if ( noteStart[ loc ] ) then
           -- A note
-          local pitch, vel, startppqpos, endppqpos = table.unpack( notes[ noteStart[loc] ] )
+          local pitch, vel, startppqpos, endppqpos, detune = table.unpack( notes[ noteStart[loc] ] )
 
           -- Store the legato state of the note that we are copying
           if ( chan == 1 ) then
@@ -8501,7 +8736,7 @@ function tracker:copyToClipboard()
           if ( endppqpos > maxppq ) then
             endppqpos = maxppq
           end
-          self:addDataToClipboard( newclipboard, { 'NOTE', pitch, vel, startppqpos, endppqpos } )
+          self:addDataToClipboard( newclipboard, { 'NOTE', pitch, vel, startppqpos, endppqpos, detune } )
           firstNote = 0
         elseif ( noteGrid[ loc ] ) then
           -- Grab OFF locations
@@ -8997,7 +9232,8 @@ function tracker:disarm()
   end
 end
 
-function tracker:playNote(chan, pitch, vel)
+function tracker:playNote(chan, pitch, vel, detune)
+  detune = detune or 0
   local line_played = self.line_played or {}
   local ch = 1
   if ( self:isArmed() and not (self.cfg.readfrommidi == 1) ) then
@@ -9008,6 +9244,8 @@ function tracker:playNote(chan, pitch, vel)
       else
         ch = self.outChannel - 1
       end
+      local msg2, msg3 = microtuning:centsToCC(detune)
+      reaper.StuffMIDIMessage(0, 0xE0 + ch, msg2, msg3)
       reaper.StuffMIDIMessage(0, 0x90 + ch, pitch, vel)
     else
       -- Only create note if it isn't already playing
@@ -9025,6 +9263,8 @@ function tracker:playNote(chan, pitch, vel)
         else
           ch = self.outChannel - 1
         end
+        local msg2, msg3 = microtuning:centsToCC(detune)
+        reaper.StuffMIDIMessage(0, 0xE0 + ch, msg2, msg3)
         reaper.StuffMIDIMessage(0, 0x90 + ch, pitch, vel)
       end
     end
@@ -9103,7 +9343,7 @@ function tracker:insertChord(chord)
   for i=1,#chord do
     local row = origrow
 
-    -- 'NOTE' (1), pitch (2), velocity (3), startppq (4), endppq (5)
+    -- 'NOTE' (1), pitch (2), velocity (3), startppq (4), endppq (5), detune (6)
     local note = noteGrid[chan*rows+row-1]
     local noteToEdit = noteStart[rows*chan+row]
 
@@ -9607,7 +9847,9 @@ function tracker:playLine()
          reaper.StuffMIDIMessage(0, 0x80 + c, line_played[c][0], line_played[c][1])
       end
     
-      local pitch, vel = table.unpack(notes[noteToEdit])
+      local pitch, vel, _, _, detune = table.unpack(notes[noteToEdit])
+      local lsb, msb = microtuning:centsToCC(detune)
+      reaper.StuffMIDIMessage(0, 0xE0 + c, lsb, msb)
       reaper.StuffMIDIMessage(0, 0x90 + c, pitch, vel)
       line_played[c] = {}
       line_played[c][0] = pitch
@@ -10738,6 +10980,8 @@ function tracker:processKeyboardInput()
       self:duplicate()
     elseif inputs('commit') and self.take then
       self:setResolution( self.newRowPerQn )
+      self.currentTuning = microtuning:setTuningFromNumber(self.newTuning)
+      self:storeTuning()
       self:saveConfig(self.configFile, self.cfg)
       self.hash = math.random()
     elseif inputs('setloop') and self.take then
@@ -11033,6 +11277,8 @@ local function updateLoop()
       tracker:saveConfig(tracker.configFile, tracker.cfg)
     elseif ( mouse_cap == CaptureModes.OCT_SELECTOR ) then
       tracker.transpose = getCapValue( 0.05 )
+     elseif ( mouse_cap == CaptureModes.TUN_SELECTOR ) then
+       tracker.newTuning = getCapValue( 0.05 )
     elseif ( mouse_cap == CaptureModes.RES_SELECTOR ) then
       tracker.newRowPerQn = getCapValue( 0.05 )
       if ( right == 1 and tracker.lastright == 0 ) then
@@ -11156,6 +11402,18 @@ local function updateLoop()
           end
         elseif dials[5]:over() then
           local menu_string = ""
+          for i=0,#microtuning.tunings do
+            menu_string = menu_string .. "|" .. (tracker.currentTuning == i and "!" or "") .. "Set scale to " .. microtuning.tunings[i].name
+          end
+          local menu_response = gfx.showmenu(menu_string)
+          if menu_response > 0 then
+            tracker.newTuning = math.floor(menu_response) - 1
+            tracker.currentTuning = microtuning:setTuningFromNumber(tracker.newTuning)
+            tracker:storeTuning()
+            self.hash = math.random()
+          end
+        elseif dials[6]:over() then
+          local menu_string = ""
           for i=1,tracker.maxRowPerQn do
             menu_string = menu_string .. "|" .. (tracker.rowPerQn == i and "!" or "") .. "Set resolution to " .. i
           end
@@ -11167,7 +11425,7 @@ local function updateLoop()
             tracker:saveConfig(tracker.configFile, tracker.cfg)
             self.hash = math.random()
           end
-        elseif (#dials > 5 and dials[6]:over()) then
+        elseif (#dials > 6 and dials[7]:over()) then
           local menu_string = ""
           for i=1,16 do
             menu_string = menu_string .. "|" .. (tracker:lastVel() == i and "!" or "") .. "Set instrument to " .. i
@@ -11306,8 +11564,10 @@ local function updateLoop()
       elseif ( dials[4]:over() ) then
         setCapMode(CaptureModes.OCT_SELECTOR, tracker.transpose, tracker.minoct, tracker.maxoct) -- Oct
       elseif ( dials[5]:over() ) then
+        setCapMode(CaptureModes.TUN_SELECTOR, tracker.newTuning, 0, 4) -- Tun
+      elseif ( dials[6]:over() ) then
         setCapMode(CaptureModes.RES_SELECTOR, tracker.newRowPerQn, 1, tracker.maxRowPerQn) -- Res
-      elseif ( #dials > 5 and dials[6]:over() ) then
+      elseif ( #dials > 6 and dials[7]:over() ) then
         setCapMode(CaptureModes.INS_SELECTOR, tracker.cfg.lastVelSample, 1, 16) -- Ins
       elseif ( gfx.mouse_x < plotData.xstart + gfx.measurestr("[Rec]") ) and ( gfx.mouse_x > plotData.xstart ) and (gfx.mouse_y > dials[1].ymin) and (gfx.mouse_y < dials[1].ymax) then
         if ( tracker.lastleft ~= 1 ) then
