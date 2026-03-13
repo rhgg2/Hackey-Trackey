@@ -4830,11 +4830,32 @@ function tracker:shiftAt( x, y, shift, scale, onlyNotes )
       end
 
       self:retuneNote(selected, chan, newPitch, newDetune)
+      if self.line_played and self.line_played[chan] and pitch == self.line_played[chan][0] then
+        local outCh = self:findOutputChannel(chan)
+        local vel = self.line_played[chan][1]
+        reaper.StuffMIDIMessage(0, 0x80 + outCh, pitch, vel)
+
+        local lsb, msb = microtuning:centsToCC(newDetune)
+        reaper.StuffMIDIMessage(0, 0xE0 + outCh, lsb, msb)
+        reaper.StuffMIDIMessage(0, 0x90 + outCh, newPitch, vel)
+        self.line_played[chan][0] = newPitch
+      end
+
     elseif ( not onlyNotes ) then
       if ( datafields[x] == 'vel1' ) or ( datafields[x] == 'vel2' ) then
         -- Velocity
-        local pitch, vel, startppqpos, endppqpos = table.unpack( note )
-        reaper.MIDI_SetNote(self.take, selected, nil, nil, nil, nil, nil, nil, clamp(0, 127,vel+shift), true)
+        local pitch, vel, startppqpos, endppqpos, detune = table.unpack( note )
+        local newVel = clamp(0, 127,vel+shift)
+        reaper.MIDI_SetNote(self.take, selected, nil, nil, nil, nil, nil, nil, newVel, true)
+        if self.line_played and self.line_played[chan] and pitch == self.line_played[chan][0] then
+          local outCh = self:findOutputChannel(chan)
+          reaper.StuffMIDIMessage(0, 0x80 + outCh, pitch, vel)
+          
+          local lsb, msb = microtuning:centsToCC(detune)
+          reaper.StuffMIDIMessage(0, 0xE0 + outCh, lsb, msb)
+          reaper.StuffMIDIMessage(0, 0x90 + outCh, pitch, newVel)
+          self.line_played[chan][1] = newVel
+        end
       elseif ( datafields[x] == 'delay1' ) or ( datafields[x] == 'delay2' ) then
         -- Note delay
         local delay = self:getNoteDelay( selected )
@@ -5275,18 +5296,36 @@ function tracker:createNote(inChar, shift)
     changeOctave(tonumber(char))
   elseif ( ( ftype == 'vel1' ) and validHex( char ) ) then
     if ( noteToEdit ) then
-      local pitch, vel, startppqpos, endppqpos = table.unpack( notes[noteToEdit] )
+      local pitch, vel, startppqpos, endppqpos, detune = table.unpack( notes[noteToEdit] )
       local newvel = tracker:editVelField( vel, 1, char )
       self:setLastVel(newvel)
       reaper.MIDI_SetNote(self.take, noteToEdit, nil, nil, nil, nil, nil, nil, newvel, true)
+      if self.line_played and self.line_played[chan] and pitch == self.line_played[chan][0] then
+        local outCh = self:findOutputChannel(chan)
+        reaper.StuffMIDIMessage(0, 0x80 + outCh, pitch, vel)
+          
+        local lsb, msb = microtuning:centsToCC(detune)
+        reaper.StuffMIDIMessage(0, 0xE0 + outCh, lsb, msb)
+        reaper.StuffMIDIMessage(0, 0x90 + outCh, pitch, newvel)
+        self.line_played[chan][1] = newvel
+      end
     end
     shouldMove = true
   elseif ( ( ftype == 'vel2' ) and validHex( char ) ) then
     if ( noteToEdit ) then
-      local pitch, vel, startppqpos, endppqpos = table.unpack( notes[noteToEdit] )
+      local pitch, vel, startppqpos, endppqpos, detune = table.unpack( notes[noteToEdit] )
       local newvel = tracker:editVelField( vel, 2, char )
       self:setLastVel(newvel)
       reaper.MIDI_SetNote(self.take, noteToEdit, nil, nil, nil, nil, nil, nil, newvel, true)
+      if self.line_played and self.line_played[chan] and pitch == self.line_played[chan][0] then
+        local outCh = self:findOutputChannel(chan)
+        reaper.StuffMIDIMessage(0, 0x80 + outCh, pitch, vel)
+          
+        local lsb, msb = microtuning:centsToCC(detune)
+        reaper.StuffMIDIMessage(0, 0xE0 + outCh, lsb, msb)
+        reaper.StuffMIDIMessage(0, 0x90 + outCh, pitch, newvel)
+        self.line_played[chan][1] = newvel
+      end
     end
     shouldMove = true
   elseif ( ( ftype == 'fx1' ) and validHex( char ) ) then
@@ -9232,47 +9271,45 @@ function tracker:disarm()
   end
 end
 
+function tracker:findOutputChannel(chan)
+  if self.outChannel == 0 then
+    return chan
+  else
+    return self.outChannel - 1
+  end
+end
+
 function tracker:playNote(chan, pitch, vel, detune)
   detune = detune or 0
   local line_played = self.line_played or {}
-  local ch = 1
+  local outCh = self:findOutputChannel(chan)
   if ( self:isArmed() and not (self.cfg.readfrommidi == 1) ) then
     if self.cfg.releaseNoteOffs == 0 then
       self:stopNote()
-      if self.outChannel == 0 then
-        ch = chan
-      else
-        ch = self.outChannel - 1
-      end
       local msg2, msg3 = microtuning:centsToCC(detune)
-      reaper.StuffMIDIMessage(0, 0xE0 + ch, msg2, msg3)
-      reaper.StuffMIDIMessage(0, 0x90 + ch, pitch, vel)
+      reaper.StuffMIDIMessage(0, 0xE0 + outCh, msg2, msg3)
+      reaper.StuffMIDIMessage(0, 0x90 + outCh, pitch, vel)
     else
       -- Only create note if it isn't already playing
       local found = false
       if self.listeners then
         for i,v in pairs(self.listeners) do
-          if (v[1] == ch) and (v[2] == pitch) then
+          if (v[1] == outCh) and (v[2] == pitch) then
             found = 1
           end
         end
       end
       if not found then
-        if self.outChannel == 0 then
-          ch = chan
-        else
-          ch = self.outChannel - 1
-        end
         local msg2, msg3 = microtuning:centsToCC(detune)
-        reaper.StuffMIDIMessage(0, 0xE0 + ch, msg2, msg3)
-        reaper.StuffMIDIMessage(0, 0x90 + ch, pitch, vel)
+        reaper.StuffMIDIMessage(0, 0xE0 + outCh, msg2, msg3)
+        reaper.StuffMIDIMessage(0, 0x90 + outCh, pitch, vel)
       end
     end
-    self.lastNote = {ch, pitch, vel}
+    self.lastNote = {outCh, pitch, vel}
     
-    line_played[ch] = {}
-    line_played[ch][0] = pitch
-    line_played[ch][1] = vel
+    line_played[chan] = {}
+    line_played[chan][0] = pitch
+    line_played[chan][1] = vel
   end
   self.line_played = line_played
 end
@@ -9294,10 +9331,11 @@ function tracker:stopAllNotes()
     if self.line_played then
       local line_played = self.line_played
       for c = 1,self.channels do 
-        if self.line_played[c] then
-          reaper.StuffMIDIMessage(0, 0x80 + c, line_played[c][0], line_played[c][1])
+        if line_played[c] then
+          reaper.StuffMIDIMessage(0, 0x80 + self:findOutputChannel(c), line_played[c][0], line_played[c][1])
         end
       end
+      self.line_played = {}
     end
   end
 end
@@ -9834,23 +9872,24 @@ function tracker:playLine()
   local noteStart = data.noteStart
   local noteGrid  = data.note
   local ftype, chan, row = self:getLocation()
-  for c = 1,self.channels do  
+  for c = 1,self.channels do
+    local outCh = self:findOutputChannel(c)
     local noteToEdit = noteStart[rows*c+row]
     local noteOff = noteGrid[rows*c+row] and noteGrid[rows*c+row] == -1
     
     if (noteOff) then
       if line_played[c] then
-        reaper.StuffMIDIMessage(0, 0x80 + c, line_played[c][0], line_played[c][1])
+        reaper.StuffMIDIMessage(0, 0x80 + outCh, line_played[c][0], line_played[c][1])
       end
     elseif noteToEdit then
       if line_played[c] then
-         reaper.StuffMIDIMessage(0, 0x80 + c, line_played[c][0], line_played[c][1])
+        reaper.StuffMIDIMessage(0, 0x80 + outCh, line_played[c][0], line_played[c][1])
       end
     
       local pitch, vel, _, _, detune = table.unpack(notes[noteToEdit])
       local lsb, msb = microtuning:centsToCC(detune)
-      reaper.StuffMIDIMessage(0, 0xE0 + c, lsb, msb)
-      reaper.StuffMIDIMessage(0, 0x90 + c, pitch, vel)
+      reaper.StuffMIDIMessage(0, 0xE0 + outCh, lsb, msb)
+      reaper.StuffMIDIMessage(0, 0x90 + outCh, pitch, vel)
       line_played[c] = {}
       line_played[c][0] = pitch
       line_played[c][1] = vel
@@ -9890,10 +9929,7 @@ function tracker:addListener(charToListenTo, pitchChar)
     local pitch = note + self.transpose * 12
     local ftype, chan, row = self:getLocation()
     
-    if self.outChannel > 0 then
-      chan = self.outChannel - 1
-    end
-    self.listeners[charToListenTo] = {chan, pitch};
+    self.listeners[charToListenTo] = {self:findOutputChannel(chan), pitch};
   end
 end
 
@@ -10929,6 +10965,7 @@ function tracker:processKeyboardInput()
       end
       self:forceUpdate()
     elseif inputs('stop2') then
+      self:stopAllNotes()
       reaper.Main_OnCommand(1016, 0)
     elseif inputs('panic') then
       reaper.Main_OnCommand(40345, 0)
