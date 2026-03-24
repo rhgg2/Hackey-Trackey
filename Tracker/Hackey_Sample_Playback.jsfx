@@ -471,7 +471,7 @@ local(frac, ism1, is0, is1, is2, id0, id1, id2, id3, fade_fraction)
         );
       );
     ) : (
-      (read_ptr > fade_start) ? (
+      ((read_ptr > fade_start) && (speed > 0)) || ((read_ptr < start_ptr - 2 * speed * fade_out_samples) && (speed < 0)) ? (
         x_fade_position = - fade_out_samples;
       );
     );
@@ -514,7 +514,7 @@ local(frac, ism1, is0, is1, is2, id0, id1, id2, id3, fade_fraction)
       outR = fade_level*this.sinc_interp(start_ptr, position, 1);
     ) : (interpolation > 2) ? (
       read_ptr = start_ptr + 2 * floor(position);
-      speed <= 1 ? (
+      abs(speed) <= 1 ? (
         outL = this.left.downsample_fir(2*fade_level*this.sinc_interp(start_ptr, position, 0), 0);
         outR = this.right.downsample_fir(2*fade_level* this.sinc_interp(start_ptr, position, 1), 0);
       ) : (
