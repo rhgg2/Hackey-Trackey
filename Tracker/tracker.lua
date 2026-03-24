@@ -772,6 +772,7 @@ tracker.newTuning = 0
 
 -- Pitchbend range for microtuning
 tracker.pbRange = 2
+tracker.defaultPBRange = 2
 
 -- If duplicationBehaviour is set to 1, then MIDI items are duplicated via reaper commands.
 -- This means duplicated copies share the same automation pool for the automation takes.
@@ -1626,6 +1627,7 @@ function tracker:loadKeys( keySet )
     keys.remCol         = { 1,    0,  1,    13 }            -- CTRL + Shift + -
     keys.addColAll      = { 1,    0,  1,    1 }             -- CTRL + Shift + A
     keys.addPatchSelect = { 1,    0,  1,    16 }            -- CTRL + Shift + P
+    keys.setPBRange     = { 1,    0,  1,    18 }            -- CTRL + Shift + R
     keys.tab            = { 0,    0,  0,    9 }             -- Tab
     keys.shifttab       = { 0,    0,  1,    9 }             -- SHIFT + Tab
     keys.follow         = { 1,    0,  0,    6 }             -- CTRL + F
@@ -1720,6 +1722,7 @@ function tracker:loadKeys( keySet )
       { 'CTRL + +/-', 'Advanced col options' },
       { 'CTRL + Shift + +/-', 'Add CC (adv mode)' },
       { 'CTRL + Shift + A/P', 'Per channel CC/PC' },
+      { 'CTRL + Shift + R', 'Set pitchbend range' },
       { 'CTRL + Shift + Click row indicator', 'Change highlighting (RMB resets)' },
       { 'CTRL + Alt + Click row indicator', 'Change fixed indicator position' },
       { 'CTRL + S / CTRL + A', '(un)Solo / (un)Mute' },   
@@ -1807,6 +1810,7 @@ function tracker:loadKeys( keySet )
     keys.deleteRow      = { 1,    0,  0,    6579564 }       -- Ctrl + Del
     keys.addColAll      = { 1,    0,  1,    1 }             -- CTRL + Shift + A
     keys.addPatchSelect = { 1,    0,  1,    16 }            -- CTRL + Shift + P
+    keys.setPBRange     = { 1,    0,  1,    18 }            -- CTRL + Shift + R
     keys.nextTrack      = { 1,    0,  1,    1919379572.0 }  -- CTRL + Shift + ->
     keys.prevTrack      = { 1,    0,  1,    1818584692.0 }  -- CTRL + Shift + <-
 
@@ -1896,6 +1900,7 @@ function tracker:loadKeys( keySet )
       { 'CTRL + +/-', 'Advanced col options' },
       { 'CTRL + Shift + +/-', 'Add CC (adv mode)' },
       { 'CTRL + Shift + A/P', 'Per channel CC/PC' },
+      { 'CTRL + Shift + R', 'Set pitchbend range' },
       { 'CTRL + Shift + Click row indicator', 'Change highlighting (RMB resets)' },
       { 'CTRL + Alt + Click row indicator', 'Change fixed indicator position' },
       { 'CTRL + T', 'Toggle advance to next note mode' },
@@ -1984,6 +1989,7 @@ function tracker:loadKeys( keySet )
     keys.remCol         = { 1,    0,  1,    13 }            -- CTRL + Shift + -
     keys.addColAll      = { 1,    0,  1,    1 }             -- CTRL + Shift + A
     keys.addPatchSelect = { 1,    0,  1,    16 }            -- CTRL + Shift + P
+    keys.setPBRange     = { 1,    0,  1,    18 }            -- CTRL + Shift + R
     keys.tab            = { 0,    0,  0,    9 }             -- Tab
     keys.shifttab       = { 0,    0,  1,    9 }             -- SHIFT + Tab
     keys.follow         = { 1,    0,  0,    6 }             -- CTRL + F
@@ -3807,7 +3813,7 @@ function tracker:renderGUI()
     gfx.x = xl
     if ( self.renaming == 3 ) then
       gfx.set(table.unpack(colors.changed))
-      gfx.printf("%3s", tracker.newLength)
+      gfx.printf("%3s", tracker.renamingInput)
     else
       gfx.set(table.unpack(colors.textcolor))
       gfx.printf("%3d", self.max_ypos)
@@ -3833,7 +3839,14 @@ function tracker:renderGUI()
   gfx.x = plotData.xstart
   gfx.y = bottom + extraFontShift
   gfx.set(table.unpack(colors.headercolor))
-  if ( tracker.renaming ~= 2 and tracker.renaming ~= 4 ) then
+  if ( tracker.renaming == 2 or tracker.renaming == 4 or tracker.renaming == 5 ) then
+    gfx.set(table.unpack(colors.changed))
+    if ( self.renamingInput:len() > 0 ) then
+      gfx.printf("%s", self.renamingInput)
+    else
+      gfx.printf("_")
+    end
+  else
     if ( self.take ) then
       local current_description = description[tracker.xpos]
       
@@ -3842,13 +3855,6 @@ function tracker:renderGUI()
       end
       gfx.printf("%s", current_description)
     end
-  else
-      gfx.set(table.unpack(colors.changed))
-      if ( self.newCol:len() > 0 ) then
-        gfx.printf("%s", self.newCol)
-      else
-        gfx.printf("_")
-      end
   end
 
   local patternName
@@ -3856,8 +3862,8 @@ function tracker:renderGUI()
   gfx.y = bottom + extraFontShift
   if ( tracker.renaming == 1 ) then
     gfx.set(table.unpack(colors.changed))
-    if ( self.midiName:len() > 0 ) then
-      patternName = self.midiName
+    if ( self.renamingInput:len() > 0 ) then
+      patternName = self.renamingInput
     else
       patternName = '_'
     end
@@ -6297,6 +6303,7 @@ function tracker:getTuning()
   end
   
   local newTuning = microtuning:setDefaultTuning()
+--  tracker.pbRange = tracker.defaultPBRange
   if (newTuning ~= self.currentTuning) then
     self.currentTuning = newTuning
     self.newTuning = newTuning
@@ -7489,14 +7496,14 @@ local stringbuffer = "                                                          
 function tracker:addCol()
   if ( self.showMod == 1 ) then
     tracker.renaming = 2
-    tracker.newCol = ''
+    tracker.renamingInput = ''
   end
 end
 
 function tracker:addColAll()
   if ( self.showMod == 1 ) then
     tracker.renaming = 4
-    tracker.newCol = ''
+    tracker.renamingInput = ''
   end
 end
 
@@ -7508,8 +7515,8 @@ function tracker:createCCCol()
   end
 
   local modtypes = data.modtypes
-  if ( pcall( function () tonumber( tracker.newCol ) end ) ) then
-    local newCol = tonumber( tracker.newCol )
+  if ( pcall( function () tonumber( tracker.renamingInput ) end ) ) then
+    local newCol = tonumber( tracker.renamingInput )
     if ( newCol and ( newCol > -1 ) ) then
       modtypes[#modtypes+1] = newCol
       self:storeOpenCC()
@@ -7526,8 +7533,8 @@ function tracker:createCCColAll()
     data.modtypes = {}
   end
 
-  if ( pcall( function () tonumber( tracker.newCol ) end ) ) then
-    local newCol = tonumber( tracker.newCol )
+  if ( pcall( function () tonumber( tracker.renamingInput ) end ) ) then
+    local newCol = tonumber( tracker.renamingInput )
     if ( newCol and ( newCol > -1 ) ) then
       for i=1,15 do
         data.modtypes[#data.modtypes+1] = newCol + self.CCjump * i
@@ -7825,6 +7832,30 @@ function tracker:retuneNote(note, channel, newPitch, newDetune, nextNote)
         reaper.MIDI_SetCC(self.take, i, nil, nil, nil, nil, nil, newMsg2, newMsg3, true)
       end
     end
+  end
+end
+
+function tracker:updatePBRange()
+  if ( pcall( function () tonumber( self.renamingInput ) end ) ) then
+    local newPBRange = tonumber( self.renamingInput )
+    local scaleFactor = self.pbRange / newPBRange
+
+    local _, _, ccevtcntOut, _ = reaper.MIDI_CountEvts(self.take)
+    for i=0,ccevtcntOut do
+      local _,_, _, _, chanmsg, _, msg2, msg3 = reaper.MIDI_GetCC(self.take, i)
+      if chanmsg == 224 then
+        local newMsg = ((msg3*128 + msg2) - 8192) * scaleFactor
+        newMsg = clamp(0, 16383, math.floor(newMsg + 8192.5))
+        local newMsg2 = newMsg & 0x7F
+        local newMsg3 = (newMsg >> 7) & 0x7F
+        reaper.MIDI_SetCC(self.take, i, nil, nil, nil, nil, nil, newMsg2, newMsg3, true)
+      end
+    end
+    self.pbRange = newPBRange
+    self:storeTuning()
+    reaper.MIDI_Sort(self.take)
+  else
+    print("Passed invalid number")
   end
 end
 
@@ -9776,7 +9807,7 @@ function tracker:seekTrack( dir )
 end
 
 function tracker:resizePattern()
-  local newLen = tonumber(self.newLength)
+  local newLen = tonumber(self.renamingInput)
   if ( newLen and ( newLen > 0 ) ) then
     local glueCmd = 40362
     local newLenS = newLen / self.rowPerSec
@@ -11054,14 +11085,16 @@ function tracker:processKeyboardInput()
       modified = 1
     elseif inputs('addPatchSelect') and self.take then
       self:addPatchSelect()
+    elseif inputs('setPBRange') and self.take then
+      self.renamingInput = ''
+      self.renaming = 5
     elseif inputs('remCol') and self.take then
       self:remCol()
       modified = 1
     elseif inputs('rename') and self.take then
       self.oldMidiName = self.midiName
-      self.midiName = ''
+      self.renamingInput = ''
       self.renaming = 1
-      self:updateMidiName()
     elseif inputs('playline') then
       self:playLine()
     elseif inputs('toggleRec') then
@@ -11099,67 +11132,39 @@ function tracker:processKeyboardInput()
       modified = 1
       self:noteEdit()
     end
-  elseif( self.renaming == 1 ) then
-    -- Renaming pattern
-    if inputs( 'enter' ) then
+  else
+    -- We are entering a value
+
+    local alphaAllowed = (self.renaming == 1)
+    
+    if inputs( 'escape' ) then
       self.renaming = 0
-    elseif inputs( 'escape' ) then
-      self.midiName = self.oldMidiName
-      self:updateMidiName()
+    elseif inputs( 'enter' ) then
+      -- finalise input
+      if( self.renaming == 1 ) then
+        -- Renaming pattern
+        self.midiName = self.renamingInput
+        self:updateMidiName()
+      elseif ( self.renaming == 2 ) then
+        -- Adding column
+        self:createCCCol()
+      elseif ( self.renaming == 3 ) then
+        -- Resize pattern
+        self:resizePattern()
+      elseif ( self.renaming == 4 ) then
+        -- Adding global column
+        self:createCCColAll()
+      elseif ( self.renaming == 5 ) then
+        -- changing pitchbend range
+        self:updatePBRange()
+      end
       self.renaming = 0
     elseif inputs( 'remove' ) then
-      self.midiName = self.midiName:sub(1, self.midiName:len()-1)
-      self:updateMidiName()
+      self.renamingInput = self.renamingInput:sub(1, self.renamingInput:len()-1)
     else
-      if ( pcall( function () string.char(lastChar) end ) ) then
+      if alphaAllowed or select(2, pcall(function() return string.char(lastChar):match('%d') end)) then
         local str = string.char( lastChar )
-        self.midiName = string.format( '%s%s', self.midiName, str )
-        self:updateMidiName()
-      end
-    end
-  elseif ( self.renaming == 2 ) then
-    -- Adding column
-    if inputs( 'enter' ) then
-      self.renaming = 0
-      self:createCCCol()
-    elseif( inputs( 'escape' ) ) then
-      self.renaming = 0
-    elseif( inputs( 'remove' ) ) then
-      self.newCol = self.newCol:sub(1, self.newCol:len()-1)
-    elseif ( lastChar > 0 ) then
-      if ( pcall( function () string.char( lastChar ) tonumber(lastChar) end ) ) then
-        local str = string.char( lastChar )
-        self.newCol = string.format( '%s%s', self.newCol, str )
-      end
-    end
-  elseif ( self.renaming == 3 ) then
-    -- Resizing pattern
-    if inputs( 'enter' ) then
-      self.renaming = 0
-      self:resizePattern()
-    elseif( inputs( 'escape' ) ) then
-      self.renaming = 0
-    elseif( inputs( 'remove' ) ) then
-      self.newLength = self.newLength:sub(1, self.newLength:len()-1)
-    elseif ( lastChar > 0 ) then
-      if ( pcall( function () string.char( lastChar ) tonumber(lastChar) end ) ) then
-        local str = string.char( lastChar )
-        self.newLength = string.format( '%s%s', self.newLength:sub(1,2), str )
-      end
-    end
-  elseif ( self.renaming == 4 ) then
-    -- Adding column to all patterns
-    if inputs( 'enter' ) then
-      self.renaming = 0
-      self:createCCColAll()
-    elseif( inputs( 'escape' ) ) then
-      self.renaming = 0
-    elseif( inputs( 'remove' ) ) then
-      self.newCol = self.newCol:sub(1, self.newCol:len()-1)
-    elseif ( lastChar > 0 ) then
-      if ( pcall( function () string.char( lastChar ) tonumber(lastChar) end ) ) then
-        local str = string.char( lastChar )
-        self.newCol = string.format( '%s%s', self.newCol, str )
+        self.renamingInput = string.format( '%s%s', self.renamingInput, str )
       end
     end
   end
@@ -11560,7 +11565,7 @@ local function updateLoop()
     if ( gfx.mouse_x > xl ) and ( gfx.mouse_x < xm ) and ( gfx.mouse_y < ym ) then
       if ( gfx.mouse_y > yl ) then
         tracker.renaming = 3
-        tracker.newLength = tostring(tracker.max_ypos)
+        tracker.renamingInput = tostring(tracker.max_ypos)
       else
         local function goto_position(i)
           local newY = i + fov.scrolly
@@ -12300,6 +12305,7 @@ local function Main()
     keys.remCol         = { 1,    0,  1,    13 }            -- CTRL + Shift + -
     keys.addColAll      = { 1,    0,  1,    1 }             -- CTRL + Shift + A
     keys.addPatchSelect = { 1,    0,  1,    16 }            -- CTRL + Shift + P
+    keys.setPBRange     = { 1,    0,  1,    18 }            -- CTRL + Shift + R
     keys.tab            = { 0,    0,  0,    9 }             -- Tab
     keys.shifttab       = { 0,    0,  1,    9 }             -- SHIFT + Tab
     keys.follow         = { 1,    0,  0,    6 }             -- CTRL + F
@@ -12402,6 +12408,7 @@ local function Main()
       { 'CTRL + +/-', 'Advanced col options' },
       { 'CTRL + Shift + +/-', 'Add CC (adv mode)' },
       { 'CTRL + Shift + A/P', 'Per channel CC/PC' },
+      { 'CTRL + Shift + R', 'Set pitchbend range' },
       { '', '' },
       { 'Harmony helper', '' },
       { 'F9', 'Toggle harmonizer' },

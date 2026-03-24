@@ -135,12 +135,15 @@ function microtuning:serialiseTuning()
     table.insert(pitches, tostring(self.activeTuning.pitches[i]))
     table.insert(stepNames, string.format('%2s',self.activeTuning.stepNames[i]))
   end
-  return string.format('%5s',self.activeTuning.name) .. table.concat(pitches, ",") .. '|' .. table.concat(stepNames) .. '|' .. tostring(self.activeTuning.octaveStep)
+  return string.format('%5s',self.activeTuning.name) .. table.concat(pitches, ",") .. '|' .. table.concat(stepNames) .. '|' .. tostring(self.activeTuning.octaveStep) .. '|' .. tostring(tracker.pbRange)
 end
 
 function microtuning:unserialiseTuning(str)
-  local name, pitchTxt, stepTxt, octaveTxt = string.match(str,
-                                                          '(.....)([^|]*)|([^|]*)|(.*)')
+  local name, pitchTxt, stepTxt, octaveTxt, pbRangeTxt = string.match(str, '(.....)([^|]*)|([^|]*)|([^|]*)|(.*)')
+  if not name then
+    name, pitchTxt, stepTxt, octaveTxt = string.match(str, '(.....)([^|]*)|([^|]*)|(.*)')
+    pbRangeTxt = '2'
+  end
   local pitches = {}
   local stepNames = {}
   local i = 1
@@ -150,6 +153,11 @@ function microtuning:unserialiseTuning(str)
       stepNames[i-1] = string.sub(stepTxt, 2*i-1, 2*i)
       i=i+1
     end
+
+    if tonumber(pbRangeTxt) then
+      tracker.pbRange = tonumber(pbRangeTxt)
+    end
+    
     local octaveStep = tonumber(octaveTxt)
     return self:setTuningFromData(name, pitches, stepNames, octaveStep)
   end
@@ -183,7 +191,7 @@ function microtuning:setTuningFromData(name,pitches,stepNames,octaveStep)
   end
 
   local newTuning = { pitches = pitches, stepNames =
-                        stepNames, octaveStep = octaveStep }
+                        stepNames, octaveStep = octaveStep or 0 }
 
   if not extant then
     newTuning.name = name
@@ -277,7 +285,7 @@ end
 
 function microtuning:centsToCC(cents)
   local pbvalue = math.floor((cents * 81.92 / tracker.pbRange) + 8192.5)
-  pbvalue = pbvalue < 0 and 0 or (pbvalue > 16383 and 16838 or pbvalue)
+  pbvalue = pbvalue < 0 and 0 or (pbvalue > 16383 and 16383 or pbvalue)
   msg2 = pbvalue & 0x7F
   msg3 = (pbvalue >> 7) & 0x7F
 
